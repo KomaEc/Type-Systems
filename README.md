@@ -6,8 +6,8 @@ This repository consists of implementations of some advanced type systems (mainl
 
 
 # References 
--   [**UIUC CS421**](https://courses.engr.illinois.edu/cs421/fa2015/) which implement PicoML (a subset of Ocaml). 
+-   [UIUC CS421](https://courses.engr.illinois.edu/cs421/fa2015/) which implement PicoML (a subset of Ocaml). 
 
--   [**Types and Programming Languages**](https://www.cis.upenn.edu/~bcpierce/tapl/resources.html) The book. 
+-   [Types and Programming Languages](https://www.cis.upenn.edu/~bcpierce/tapl/resources.html) The book. 
 
--   [**PKU DPPL 2018**](http://sei.pku.edu.cn/~xiongyf04/DPPL/main.htm)
+-   [PKU DPPL 2018](http://sei.pku.edu.cn/~xiongyf04/DPPL/main.htm)
