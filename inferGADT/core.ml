@@ -20,9 +20,19 @@ let rec unify eqlst : substitution option =
     unify ((ty2, ty2') :: (ty1, ty1') :: eqs)
   | _ -> None
 
-
+let fresh_Instance ((tvs, ty):polyTy) (fresh : uvargenerator) =
+  let rec fresh_aux tvs acc fresh =
+    match tvs with
+      [] -> acc, fresh
+    | t :: ts -> let (NextUVar(tau, fresh)) = fresh () in
+      fresh_aux ts ((t, tau)::acc) fresh in
+  let sub, fresh = fresh_aux tvs [] fresh in
+  app_monoTy sub ty, fresh
 
 (* type inference algorithm *)
+
+    (*
+(* side_effect alternatives *)
 let rec gather_subst (gamma : type_env) (t : term) (tau : monoTy) : substitution option =
   match t with
     TmConst c ->
@@ -126,7 +136,119 @@ let infer (gamma : type_env) (t : term) =
         TyVar n -> Some (subst_fun sigma)
       | _ -> None
   in let _ = reset () in
+  result     *)
+
+
+(* type inference algorithm *)
+let rec gather_subst (gamma : type_env) (t : term) (tau : monoTy) (fresh : uvargenerator) : substitution option * uvargenerator =
+  match t with
+    TmConst c ->
+    let tau' = const_signature c in
+    let fresh_tau', fresh = fresh_Instance tau' fresh in
+    unify [(tau, fresh_tau')], fresh
+  | TmVar x ->
+    (match lookup_env gamma x with
+       None -> None
+     | Some tau' ->
+       let fresh_tau', fresh = fresh_Instance tau' fresh in
+       unify [(tau, fresh_tau')]), fresh
+  | TmBinOp (binop, t1, t2) ->
+    let tau' = binop_signature binop in
+    let (NextUVar(tau1, fresh)) = fresh () in
+    let (NextUVar(tau2, fresh)) = fresh () in
+    (match gather_subst gamma t1 tau1 fresh with
+       None, fresh -> None, fresh
+     | Some(sigma1), fresh ->
+       (match gather_subst (app_env sigma1 gamma) t2 tau2 fresh with
+          None, fresh -> None, fresh
+        | Some sigma2, fresh ->
+          let sigma21 = subst_compose sigma2 sigma1 in
+          let fresh_tau', fresh = fresh_Instance tau' fresh in
+          (match unify [(app_monoTy sigma21
+                           (TyArrow(tau1, TyArrow(tau2, tau))),
+                         fresh_tau')] with
+             None -> None, fresh
+           | Some sigma3 ->
+             Some(subst_compose sigma3 sigma21), fresh)))
+  | TmMonOp (monop, t1) ->
+    let tau' = monop_signature monop in
+    let (NextUVar(tau1, fresh)) = fresh () in
+    (match gather_subst gamma t1 tau1 fresh with
+       None, fresh -> None, fresh
+     | Some sigma, fresh ->
+       let fresh_tau', fresh = fresh_Instance tau' fresh in
+       (match unify [(app_monoTy sigma (TyArrow(tau1, tau)), fresh_tau')] with
+          None -> None, fresh
+        | Some sigma' ->
+          Some (subst_compose sigma' sigma), fresh))
+  | Tmif (t1, t2, t3) ->
+    (match gather_subst gamma t1 TyBool fresh with
+       None, fresh -> None, fresh
+     | Some sigma1, fresh ->
+       (match gather_subst
+                (app_env sigma1 gamma)
+                t2
+                (app_monoTy sigma1 tau) fresh with
+         None, fresh -> None, fresh
+       | Some sigma2, fresh ->
+         let sigma21 = subst_compose sigma2 sigma1 in
+         (match gather_subst
+                  (app_env sigma21 gamma)
+                  t3
+                  (app_monoTy sigma21 tau) fresh with
+           None, fresh -> None, fresh
+         | Some sigma3, fresh -> Some (subst_compose sigma3 sigma21), fresh)))
+  | TmAbs (x, t) ->
+    let (NextUVar(tau1, fresh)) = fresh () in
+    let (NextUVar(tau2, fresh)) = fresh () in
+    (match gather_subst
+             (ins_env gamma x (monoTy2polyTy tau1)) t tau2 fresh with
+      None, fresh -> None, fresh
+    | Some sigma, fresh ->
+      (match unify [(app_monoTy sigma tau,
+                     app_monoTy sigma (TyArrow(tau1, tau2)))] with
+        None -> None, fresh
+      | Some sigma' -> Some (subst_compose sigma' sigma), fresh))
+  | TmApp (t1, t2) ->
+    let (NextUVar(tau1, fresh)) = fresh () in
+    (match gather_subst gamma t1 (TyArrow(tau1, tau)) fresh with
+       None, fresh -> None, fresh
+     | Some sigma, fresh ->
+       (match gather_subst
+                (app_env sigma gamma)
+                t2
+                (app_monoTy sigma tau1) fresh with
+         None, fresh -> None, fresh
+       | Some sigma', fresh ->
+         Some (subst_compose sigma' sigma), fresh))
+  | TmLet (x, t1, t2) ->
+    let (NextUVar(tau1, fresh)) = fresh () in
+    (match gather_subst
+             (ins_env gamma x (monoTy2polyTy tau1)) t1 tau1 fresh with
+      None, fresh -> None, fresh
+    | Some sigma1, fresh ->
+      let sigma1_gamma = app_env sigma1 gamma in
+      let sigma1_tau1 = app_monoTy sigma1 tau1 in
+      let sigma1_tau = app_monoTy sigma1 tau in
+      (match gather_subst
+               (ins_env sigma1_gamma
+                  x (gen sigma1_gamma sigma1_tau1)) t2
+               sigma1_tau fresh with
+        None, fresh -> None, fresh
+      | Some sigma2, fresh -> Some (subst_compose sigma2 sigma1), fresh))
+  | _ -> None, fresh
+
+let infer (gamma : type_env) (t : term) =
+  let (NextUVar(ty, fresh)) = uvargen () in
+  let result =
+    match gather_subst gamma t ty fresh  with
+      None, _ -> None
+    | Some sigma, _ -> match ty with
+        TyVar n -> Some (subst_fun sigma)
+      | _ -> None in
   result
+
+
 
 
 
