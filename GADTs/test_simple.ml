@@ -104,7 +104,6 @@ let test_equal_six =
 let test_ctx =
   [("plus", test_plus)]
 
-let eval_ = fun t -> print_endline (string_of_term (eval test_ctx t))
 
 let test_subst =
   TmApp(TmAbs("f", TmAbs("y", TmApp(TmVar "f", TmVar "y"))), TmAbs("x", TmApp(TmApp(TmVar "plus", TmVar "x"), TmVar "y")))
@@ -162,3 +161,40 @@ let test_rec1 =
                                                                      TmBinOp (MinusOp, TmVar "n", TmConst (TmInt 1)))))))),
                               TmBinOp (MinusOp, TmVar "n", TmConst (TmInt 1)))))),
      TmConst (TmInt 3))
+
+let test_pat =
+  TmFlatMatchWith(test_int_list,
+                  [FlPCstr("Nil", ["_"]), TmConst(TmTrue);
+                   FlPCstr("Cons", ["x"; "xs"]), TmConst(TmFalse)])
+let test_list_n n =
+  let rec aux n =
+    if n = 0 then TmFold(TmCstr "Nil", TmConst(TmUnit))
+    else TmFold(TmCstr "Cons", TmTuple ([TmConst(TmInt n); aux (n - 1)])) in
+  aux n
+
+let test_pat_rec =
+  TmLet("length",
+        TmAbs("l",
+              TmFlatMatchWith(TmVar "l",
+                              [FlPCstr("Nil", ["nil"]), TmConst(TmInt 0);
+                               FlPCstr("Cons", ["x";"xs"]),
+                               TmBinOp(PlusOp, TmConst(TmInt 1), TmApp(TmVar "length", TmVar "xs"))])),
+        TmApp(TmVar "length", test_list_n 5))
+
+let test_wrong =
+  TmLet("length",
+        TmAbs("l",
+              TmFlatMatchWith(TmVar "l",
+                              [FlPCstr("Nil", ["nil"]), TmConst(TmInt 0)])),
+        TmApp(TmVar "length", test_nil))
+
+let test_env =
+  ins_env primitive_env "l" ([], TyCstr("list", [TyInt]))
+let test_ok2 =
+  TmFlatMatchWith(TmVar "l",
+                  [FlPCstr("Nil", ["nil"]), TmConst(TmInt 0)])
+
+let test_wrong1 =
+  TmAbs("l",
+        TmFlatMatchWith(TmVar "l",
+                        [FlPCstr("Nil", ["nil"]), TmConst(TmInt 0)]))
