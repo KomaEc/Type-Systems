@@ -424,9 +424,14 @@ let rec string_of_term = function
   | TmAbs(x, t) -> "lambda " ^ x ^ ". " ^ (string_of_term t)
   | TmLet(x, t1, t2) -> "let " ^ x ^ " = " ^ (string_of_term t1) ^ " in " ^ (string_of_term t2)
   | TmFlatMatchWith(t, mcthl) -> "match " ^ string_of_term t ^ " with " ^ string_of_matches mcthl
+  | TmTuple(tl) -> "(" ^ string_of_terms tl ^ ")"
   | _ -> ""
+and string_of_terms = function
+    [] -> ""
+  | [x] -> string_of_term x
+  | x::xs -> string_of_term x ^ ", " ^ string_of_terms xs
 and paren_string_of_term t =
-  match t with TmVar _ | TmCstr _ | TmConst _ -> string_of_term t
+  match t with TmVar _ | TmCstr _ | TmConst _ | TmTuple _ -> string_of_term t
              | _ -> "(" ^ string_of_term t ^ ")"
 and non_app_paren_string_of_term t =
   match t with TmApp _ -> string_of_term t
