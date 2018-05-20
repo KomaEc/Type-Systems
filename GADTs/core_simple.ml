@@ -29,7 +29,10 @@ let rec unify eqlst : substitution option =
 let rec gather_term_subst (gamma : type_env) (t : term) (tau : monoTy)
     (fresh : uvargenerator) : substitution option * uvargenerator =
   match t with
-    TmUnit -> unify [(tau, TyUnit)], fresh
+    TmConst c ->
+    let tau' = const_signature c in
+    let fresh_tau', fresh = fresh_Instance tau' fresh in
+  unify [(tau, fresh_tau')], fresh
   | TmVar x ->
     (match lookup_env gamma x with
        None -> (None, fresh)
@@ -42,6 +45,52 @@ let rec gather_term_subst (gamma : type_env) (t : term) (tau : monoTy)
      | Some tau' ->
        (let (fresh_tau', fresh) = fresh_Instance tau' fresh in
         unify [(tau, fresh_tau')], fresh))
+  | TmBinOp (binop, t1, t2) ->
+    let tau' = binop_signature binop in
+    let (NextUVar(tau1, fresh)) = fresh () in
+    let (NextUVar(tau2, fresh)) = fresh () in
+    (match gather_term_subst gamma t1 tau1 fresh with
+       None, fresh -> None, fresh
+     | Some(sigma1), fresh ->
+       (match gather_term_subst (app_env sigma1 gamma) t2 tau2 fresh with
+          None, fresh -> None, fresh
+        | Some sigma2, fresh ->
+          let sigma21 = subst_compose sigma2 sigma1 in
+          let fresh_tau', fresh = fresh_Instance tau' fresh in
+          (match unify [(app_monoTy sigma21
+                           (TyArrow(tau1, TyArrow(tau2, tau))),
+                         fresh_tau')] with
+            None -> None, fresh
+          | Some sigma3 ->
+            Some(subst_compose sigma3 sigma21), fresh)))
+  | TmMonOp (monop, t1) ->
+    let tau' = monop_signature monop in
+    let (NextUVar(tau1, fresh)) = fresh () in
+    (match gather_term_subst gamma t1 tau1 fresh with
+       None, fresh -> None, fresh
+     | Some sigma, fresh ->
+       let fresh_tau', fresh = fresh_Instance tau' fresh in
+       (match unify [(app_monoTy sigma (TyArrow(tau1, tau)), fresh_tau')] with
+          None -> None, fresh
+        | Some sigma' ->
+          Some (subst_compose sigma' sigma), fresh))
+  | TmIf (t1, t2, t3) ->
+    (match gather_term_subst gamma t1 TyBool fresh with
+       None, fresh -> None, fresh
+     | Some sigma1, fresh ->
+       (match gather_term_subst
+                (app_env sigma1 gamma)
+                t2
+                (app_monoTy sigma1 tau) fresh with
+         None, fresh -> None, fresh
+       | Some sigma2, fresh ->
+         let sigma21 = subst_compose sigma2 sigma1 in
+         (match gather_term_subst
+                  (app_env sigma21 gamma)
+                  t3
+                  (app_monoTy sigma21 tau) fresh with
+           None, fresh -> None, fresh
+         | Some sigma3, fresh -> Some (subst_compose sigma3 sigma21), fresh)))
   | TmAbs (x, t) ->
     let (NextUVar(tau1, fresh)) = fresh () in
     let (NextUVar(tau2, fresh)) = fresh () in
@@ -193,7 +242,7 @@ exception NoRulesApplies
     (* warning! substituion has incorrect functionality *)
 
 let rec isval = function
-    TmVar _ | TmUnit | TmCstr _ | TmAbs _ -> true
+    TmVar _ | TmConst _ | TmCstr _ | TmAbs _ -> true
   | TmFold (t1, t2) -> isval t1 && isval t2
   | TmTuple tl -> List.for_all (fun t -> isval t) tl
   | _ -> false
@@ -206,6 +255,29 @@ let rec eval1 (ctx : valbindings) = function
       TmAbs(x, t') -> termSubstOp x (TmFix t) t'
      | _ -> eval1 ctx t)
   | TmFix t -> TmFix (eval1 ctx t)
+  | TmIf(TmConst(b), t2, t3) ->
+    (match b with TmTrue -> t2
+                | TmFalse -> t3
+                | _ -> assert false)
+  | TmIf(t1, t2, t3) -> TmIf(eval1 ctx t1, t2, t3)
+  | TmMonOp(mop, TmConst(TmInt n)) ->
+    (match mop with NegOp -> TmConst(TmInt (-n)))
+  | TmBinOp(bop, TmConst(TmInt n), TmConst(TmInt m)) ->
+    (match bop with
+       PlusOp -> TmConst(TmInt (n + m))
+     | MinusOp -> TmConst(TmInt (n - m))
+     | TimesOp -> TmConst(TmInt (n * m))
+     | DivOp -> TmConst(TmInt (n / m))
+     | EqOp -> if m = n then TmConst(TmTrue) else TmConst(TmFalse)
+     | GreaterOp -> if n >= n then TmConst(TmTrue) else TmConst(TmFalse))
+  | TmBinOp(bop, t1, t2) when isval t2 ->
+    if isval t1 then (match bop with
+          EqOp -> if t1 =  t2 then TmConst(TmTrue) else TmConst(TmFalse)
+        | GreaterOp -> let b = Pervasives.compare t1 t2 in
+          if b >= 0 then TmConst(TmTrue) else TmConst(TmFalse)
+        | _ -> assert false)
+    else TmBinOp(bop, eval1 ctx t1, t2)
+  | TmBinOp(bop, t1, t2) -> TmBinOp(bop, t1, eval1 ctx t2)
   | TmFold(TmCstr(lab), t) -> TmFold(TmCstr(lab), eval1 ctx t)
   | TmFold(t1, t2) -> TmFold(eval1 ctx t1, t2)
   | TmTuple(tl) ->
@@ -220,10 +292,8 @@ let rec eval1 (ctx : valbindings) = function
     TmApp(TmAbs(x, t1), eval1 ctx t2)
   | TmApp(t1, t2) ->
     TmApp(eval1 ctx t1, t2)
-  | TmLet(x, t1, t2) when isval t1 && isval t2 ->
-    termSubstOp x (TmFix(TmAbs(x, t1))) t2
   | TmLet(x, t1, t2) when isval t1 ->
-    TmLet(x, t1, eval1 ctx t2)
+    termSubstOp x (TmFix(TmAbs(x, t1))) t2
   | TmLet(x, t1, t2) ->
     TmLet(x, eval1 ctx t1, t2)
   | _ -> raise NoRulesApplies
