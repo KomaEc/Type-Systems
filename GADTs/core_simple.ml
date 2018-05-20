@@ -182,31 +182,16 @@ and gather_flpat_subst (gamma : type_env) (fpt : flat_pattern)
       None -> raise (SomethingWrong 2)
     | Some label_ty ->
       begin match (fresh_Instance label_ty fresh, taup) with
-          ((TyArrow(TyTuple(tau1s), TyCstr(cstr_name, alphas)), fresh), TyCstr(cstr_name', taups))
-          when cstr_name = cstr_name' ->
-          if List.length alphas <> List.length taups || List.length bindlist <> List.length tau1s then failwith "arity mismatch"
-          else let alphas = List.map (fun mty -> match mty with TyVar i -> i | _ -> assert false) alphas in
-            let theta = List.combine alphas taups in
-            let pat_env =
-              List.combine bindlist (List.map (fun mty -> monoTy2polyTy (app_monoTy theta mty)) tau1s) in
-            gather_term_subst (sum_env pat_env gamma) t tau fresh
-        | ((TyArrow(tau1s, TyCstr(cstr_name, alphas)), fresh), TyCstr(cstr_name', taups))
-          when cstr_name = cstr_name' ->
-          if List.length bindlist <> 1 || List.length alphas <> List.length taups then failwith "arity mismatch"
-          else let alphas = List.map (fun mty -> match mty with TyVar i -> i | _ -> assert false) alphas in
-            let theta = List.combine alphas taups in
-            let pat_env = match bindlist with [] -> failwith "impossible"
-                                            | [x] -> [(x, monoTy2polyTy (app_monoTy theta tau1s))]
-                                            | _ -> failwith "impossible" in
-            gather_term_subst (sum_env pat_env gamma) t tau fresh
-        | ((TyArrow(tau1s, TyCstr(cstr_name, alphas)), fresh), taup) ->
+          ((TyArrow(tau1s, TyCstr(cstr_name, alphas)), fresh), taup) ->
           (match unify [(TyCstr(cstr_name, alphas), taup)] with
              None -> None, fresh
            | Some theta -> (let pat_env = match tau1s with
                  TyTuple(tau1s) -> List.combine bindlist (List.map (fun mty -> monoTy2polyTy (app_monoTy theta mty)) tau1s)
                | _ -> match bindlist with [x] -> [(x, monoTy2polyTy (app_monoTy theta tau1s))]
                                         | _ -> failwith "impossible" in
-             gather_term_subst (sum_env pat_env gamma) t tau fresh))
+              (match gather_term_subst (sum_env pat_env gamma) t tau fresh with
+                 None, fresh -> None, fresh
+               | Some sigma, fresh -> Some (subst_compose sigma theta), fresh)))
         | _ -> raise (SomethingWrong 4)
       end
 and gather_iter_terms (gamma : type_env) (tl : term list) (cur_sub : substitution)
