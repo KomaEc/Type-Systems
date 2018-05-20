@@ -23,6 +23,10 @@ let rec unify eqlst : substitution option =
     unify ((ty2, ty2') :: (ty1, ty1') :: eqs)
   | _ -> None
 
+
+
+exception SomethingWrong of int
+
 (* type inference algorithm -- algorithm J *)
 (* algorithm properties : [Gamma |- t : tau | sigma] iff
    [sigma_Gamma |- t : sigma_tau] *)
@@ -151,7 +155,7 @@ let rec gather_term_subst (gamma : type_env) (t : term) (tau : monoTy)
   | TmFlatMatchWith (t_s, fptl) ->
     let (NextUVar(taup, fresh)) = fresh () in
     (match gather_term_subst gamma t_s taup fresh with
-       None, fresh -> (None, fresh)
+       None, fresh -> raise (SomethingWrong 1)
      | Some sigma1, fresh ->
        gather_matches_subst (app_env sigma1 gamma) fptl
          (app_monoTy sigma1 taup) (app_monoTy sigma1 tau) sigma1 fresh)
@@ -163,7 +167,7 @@ and gather_matches_subst (gamma : type_env)
     [] -> Some cur_sub, fresh
   | (fpt, t)::res ->
     match gather_flpat_subst gamma fpt t taup tau fresh with
-      None, fresh -> (None, fresh)
+      None, fresh -> raise (SomethingWrong 3)
     | Some sigma, fresh ->
       gather_matches_subst
         (app_env sigma gamma) res
@@ -175,7 +179,7 @@ and gather_flpat_subst (gamma : type_env) (fpt : flat_pattern)
     FlPVar x -> gather_term_subst (ins_env gamma x (monoTy2polyTy taup)) t tau fresh
   | FlPCstr (label, bindlist) ->
     match lookup_env gamma label with
-      None -> (None, fresh)
+      None -> raise (SomethingWrong 2)
     | Some label_ty ->
       begin match (fresh_Instance label_ty fresh, taup) with
           ((TyArrow(TyTuple(tau1s), TyCstr(cstr_name, alphas)), fresh), TyCstr(cstr_name', taups))
@@ -195,7 +199,15 @@ and gather_flpat_subst (gamma : type_env) (fpt : flat_pattern)
                                             | [x] -> [(x, monoTy2polyTy (app_monoTy theta tau1s))]
                                             | _ -> failwith "impossible" in
             gather_term_subst (sum_env pat_env gamma) t tau fresh
-        | _ -> (None, fresh)
+        | ((TyArrow(tau1s, TyCstr(cstr_name, alphas)), fresh), taup) ->
+          (match unify [(TyCstr(cstr_name, alphas), taup)] with
+             None -> None, fresh
+           | Some theta -> (let pat_env = match tau1s with
+                 TyTuple(tau1s) -> List.combine bindlist (List.map (fun mty -> monoTy2polyTy (app_monoTy theta mty)) tau1s)
+               | _ -> match bindlist with [x] -> [(x, monoTy2polyTy (app_monoTy theta tau1s))]
+                                        | _ -> failwith "impossible" in
+             gather_term_subst (sum_env pat_env gamma) t tau fresh))
+        | _ -> raise (SomethingWrong 4)
       end
 and gather_iter_terms (gamma : type_env) (tl : term list) (cur_sub : substitution)
     (cur_tyl : monoTy list) (fresh : uvargenerator) : (substitution * monoTy list) option * uvargenerator =
@@ -238,6 +250,7 @@ let infer (gamma : type_env) (t : term) : monoTy option =
 
 (*  evaluation *)
 exception NoRulesApplies
+exception NonExhaustivePatterns
 
     (* warning! substituion has incorrect functionality *)
 
@@ -296,9 +309,31 @@ let rec eval1 (ctx : valbindings) = function
     termSubstOp x (TmFix(TmAbs(x, t1))) t2
   | TmLet(x, t1, t2) ->
     TmLet(x, eval1 ctx t1, t2)
+  | TmFlatMatchWith(TmFold(TmCstr(cstr_name), t2), fptl) ->
+    let rec find_matches fptl =
+      match fptl with
+        [] -> raise NonExhaustivePatterns
+      | (fp, t) :: fps ->
+        (match fp with
+           FlPVar x -> termSubstOp x (TmFold(TmCstr(cstr_name), t2)) t
+         | FlPCstr(cstr_name', namelist) when cstr_name = cstr_name' ->
+           (match namelist with
+              [] -> assert false
+            | [x] -> termSubstOp x t2 t
+            | _ -> (match t2 with
+                  TmTuple(tl) -> let sub = List.combine namelist tl in
+                  termSubst sub t
+                | _ -> assert false ))
+         | _ -> find_matches fps) in
+    find_matches fptl
+  | TmFlatMatchWith(t, fptl) ->
+    TmFlatMatchWith(eval1 ctx t, fptl)
   | _ -> raise NoRulesApplies
 
 let rec eval (ctx : valbindings) (t : term) : term =
   try let t = eval1 ctx t in
     eval ctx t
   with NoRulesApplies -> t
+
+let eval_ = fun t -> print_endline (string_of_term t);
+  eval1 [] t
