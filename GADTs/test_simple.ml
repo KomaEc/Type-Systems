@@ -180,6 +180,10 @@ let test_pat_rec =
                                FlPCstr("Cons", ["x";"xs"]),
                                TmBinOp(PlusOp, TmConst(TmInt 1), TmApp(TmVar "length", TmVar "xs"))])),
         TmApp(TmVar "length", test_list_n 5))
+let test_tl =
+  TmAbs("l",
+        TmFlatMatchWith(TmVar "l",
+                        [FlPCstr("Cons", ["_"; "xs"]), TmVar "xs"]))
 
 let test_wrong =
   TmLet("length",
@@ -194,7 +198,15 @@ let test_ok2 =
   TmFlatMatchWith(TmVar "l",
                   [FlPCstr("Nil", ["nil"]), TmConst(TmInt 0)])
 
-let test_wrong1 =
-  TmAbs("l",
-        TmFlatMatchWith(TmVar "l",
-                        [FlPCstr("Nil", ["nil"]), TmConst(TmInt 0)]))
+
+let mk_tree_ty ty = TyCstr("tree", [ty])
+let mk_triple_ty ty1 ty2 ty3 = TyTuple([ty1; ty2; ty3])
+let label_Leaf_ty =
+  let alpha = TyVar 0 in
+  [0], TyArrow(TyUnit, mk_tree_ty alpha)
+let label_Node_ty =
+  let alpha = TyVar 0 in
+  [0], TyArrow(mk_triple_ty (mk_tree_ty alpha) alpha (mk_tree_ty alpha), mk_tree_ty alpha)
+
+let extended_env =
+  ("Leaf", label_Leaf_ty) :: ("Node", label_Node_ty) :: primitive_env
