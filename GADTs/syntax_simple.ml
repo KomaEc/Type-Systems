@@ -5,6 +5,8 @@ type monoTy =
   | TyArrow of monoTy * monoTy                   (* arrow type [tau1 -> tau2] *)
   | TyCstr of string * monoTy list               (* constructor [T x1...xn]*)
   | TyTuple of monoTy list
+  | TyInt
+  | TyBool
   | TyUnit
 
 type polyTy = tyVar list * monoTy                (* list indicates what types are universally quantified *)
@@ -14,7 +16,7 @@ type const =
 
 type bin_op =
     PlusOp | MinusOp | TimesOp | DivOp
-  | EqOp | GreaterOp | ModOp
+  | EqOp | GreaterOp
 
 type mon_op =
     NegOp
@@ -119,7 +121,29 @@ let label_make_n_ty n =
   bndVars, List.fold_right (fun i rev -> TyArrow(TyVar i, rev)) bndVars (TyTuple((List.map (fun i -> TyVar i) bndVars)))
 let pair_ty = label_make_n_ty 2
 
+let bool_ty = TyBool
+let int_ty = TyInt
+let unit_ty = TyUnit
 
+let const_signature = function
+    TmTrue | TmFalse -> [], TyBool
+  | TmInt n -> [], TyInt
+  | TmUnit -> [], TyUnit
+
+let binop_signature = function
+    PlusOp -> [], TyArrow(TyInt, TyArrow(TyInt, TyInt))
+  | MinusOp -> [], TyArrow(TyInt, TyArrow(TyInt, TyInt))
+  | TimesOp -> [], TyArrow(TyInt, TyArrow(TyInt, TyInt))
+  | DivOp -> [], TyArrow(TyInt, TyArrow(TyInt, TyInt))
+  | EqOp ->
+    let alpha = TyVar 0 in
+    [0], TyArrow(alpha, TyArrow(alpha, TyBool))
+  | GreaterOp ->
+    let alpha = TyVar 0 in
+    [0], TyArrow(alpha, TyArrow(alpha, TyBool))
+
+let monop_signature = function
+    NegOp -> [], TyArrow(TyInt, TyInt)
 
 
 (* operations on enviroment *)
@@ -251,9 +275,13 @@ let y = 3 in
 
 let rec termSubst (ts : (string * term) list) = function
     TmVar y -> (try List.assoc y ts with _ -> TmVar y)
-  | TmFix t -> termSubst ts t
+  | TmFix t -> TmFix (termSubst ts t)
   | TmFold(t1, t2) -> TmFold(termSubst ts t1, termSubst ts t2)
-  | TmApp(t1, t2) -> TmFold(termSubst ts t1, termSubst ts t2)
+  | TmApp(t1, t2) -> TmApp(termSubst ts t1, termSubst ts t2)
+  | TmBinOp(bop, t1, t2) -> TmBinOp(bop, termSubst ts t1, termSubst ts t2)
+  | TmMonOp(mop, t) -> TmMonOp(mop, termSubst ts t)
+  | TmIf(t1 ,t2 ,t3) ->
+    TmIf(termSubst ts t1, termSubst ts t2, termSubst ts t3)
   | TmAbs(x, t) -> TmAbs(x, termSubst (List.filter (fun (y, _) -> x <> y) ts) t)
   | TmLet(x, t1, t2) -> let ts' = List.filter (fun (y, _) -> x <> y) ts in
     TmLet(x, termSubst ts' t1, termSubst ts' t2)
@@ -277,6 +305,10 @@ let rec freeNamesInTerm = function
   | TmAbs(x, t) ->
     List.filter (fun y -> x <> y) (freeNamesInTerm t)
   | TmApp(t1, t2) -> freeNamesInTerm t1 @ freeNamesInTerm t2
+  | TmBinOp(_, t1, t2) -> freeNamesInTerm t1 @ freeNamesInTerm t2
+  | TmMonOp(_, t) -> freeNamesInTerm t
+  | TmIf(t1, t2, t3) ->
+    freeNamesInTerm t1 @ (freeNamesInTerm t2 @ freeNamesInTerm t3)
   | TmLet(x, t1, t2) ->
     List.filter (fun y -> x <> y) (freeNamesInTerm t1) @
     (List.filter (fun y -> x <> y) (freeNamesInTerm t2))
@@ -299,7 +331,11 @@ let rename_for (t : term) (fs : string list) =
       TmAbs(x, t') when List.mem x fs ->
       let x' = first_not_in (x ^ "'") fs in TmAbs(x', (aux (x'::fs) (termSubst [x, (TmVar x')] t')))
     | TmAbs(x, t') -> TmAbs(x, aux fs t')
-    | TmFix t -> aux fs t
+    | TmFix t -> TmFix(aux fs t)
+    | TmBinOp(bop, t1, t2) -> TmBinOp(bop, aux fs t1, aux fs t2)
+    | TmMonOp(mop, t1) -> TmMonOp(mop, aux fs t1)
+    | TmIf(t1, t2, t3) ->
+      TmIf(aux fs t1, aux fs t2, aux fs t3)
     | TmFold(t1, t2) -> TmFold(aux fs t1, aux fs t2)
     | TmApp(t1, t2) -> TmApp(aux fs t1, aux fs t2)
     | TmLet(x, t1, t2) when List.mem x fs ->
@@ -350,7 +386,6 @@ let string_of_bin_op = function
    | DivOp -> " / "
    | EqOp  -> " = "
    | GreaterOp -> " > "
-   | ModOp   -> "mod"
 
 let string_of_mon_op m =
   match m with NegOp   -> "~"
@@ -378,7 +413,8 @@ let rec string_of_term = function
   | TmConst c -> string_of_const c
   | TmIf(e1,e2,e3)->"if " ^ (string_of_term e1) ^
                        " then " ^ (string_of_term e2) ^
-                       " else " ^ (string_of_term e3)
+                    " else " ^ (string_of_term e3)
+  | TmFix t -> "fix " ^ string_of_term t
   | TmMonOp (m, t) -> (string_of_mon_op m) ^ " " ^ (paren_string_of_term t)
   | TmBinOp (b,e1,e2) ->
     ((paren_string_of_term e1) ^ " " ^ (string_of_bin_op b)
@@ -390,7 +426,7 @@ let rec string_of_term = function
   | TmFlatMatchWith(t, mcthl) -> "match " ^ string_of_term t ^ " with " ^ string_of_matches mcthl
   | _ -> ""
 and paren_string_of_term t =
-  match t with TmVar _ | TmCstr _ -> string_of_term t
+  match t with TmVar _ | TmCstr _ | TmConst _ -> string_of_term t
              | _ -> "(" ^ string_of_term t ^ ")"
 and non_app_paren_string_of_term t =
   match t with TmApp _ -> string_of_term t
