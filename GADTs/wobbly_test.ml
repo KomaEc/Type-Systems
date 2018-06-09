@@ -186,3 +186,88 @@ let test_wrong =
               TmFlatMatchWith(TmVar "l",
                               [FlPCstr("Nil", ["nil"]), TmConst(TmInt 0)])),
         TmApp(TmVar "length", test_nil))
+
+type z = Z : unit -> z
+type 'n s = S : 'n -> 'n s
+type ('a, _) gtree =
+    Leaf : unit -> ('a, z) gtree
+  | Node : ('a, 'n) gtree * 'a * ('a, 'n) gtree -> ('a, 'n s) gtree
+
+let rec height : type a n. (a, n) gtree -> n = function
+    Leaf _ -> Z ()
+  | Node (l, _, _) -> S (height l)
+
+let mk_zero_ty = TyCstr("z", [])
+let mk_succ_ty nty = TyCstr("s", [nty])
+
+let mk_gtree_ty a n = TyCstr("gtree", [a; n])
+
+let label_Z_ty =
+  [], TyArrow(TyUnit, mk_zero_ty)
+let label_S_ty =
+  let n = TyVar 0 in
+  [0], TyArrow(n, mk_succ_ty n)
+let label_Leaf_ty =
+  let a = TyVar 0 in
+  [0], TyArrow(TyUnit, mk_gtree_ty a mk_zero_ty)
+let label_Node_ty =
+  let a = TyVar 0 in
+  let n = TyVar 1 in
+  [0; 1], TyArrow(TyTuple([mk_gtree_ty a n; a; mk_gtree_ty a n]), mk_gtree_ty a (mk_succ_ty n))
+
+
+
+let extended_env : env =
+  [VarBind("Nil", R, label_Nil_ty);
+   VarBind("Cons", R, label_Cons_ty);
+   VarBind("Z", R, label_Z_ty);
+   VarBind("S", R, label_S_ty);
+   VarBind("Leaf", R, label_Leaf_ty);
+   VarBind("Node", R, label_Node_ty)]
+
+
+let test_tree =
+  TmFold(TmCstr "Leaf", TmConst(TmUnit))
+
+let test2_tree =
+  TmFold(TmCstr "Node", TmTuple [test_tree; TmConst(TmInt 3); test_tree])
+let test2_tree' =
+  TmFold(TmCstr "Node", TmTuple [test_tree; TmConst(TmInt 5); test_tree])
+let test3_tree =
+  TmFold(TmCstr "Node", TmTuple [test2_tree; TmConst(TmInt 4); test2_tree'])
+
+let test_let_annot =
+  TmLetAnnot("f", ([-1], TyArrow (TyVar (-1), TyVar (-1))), TmAbs("x", TmVar "x"), TmVar "f")
+
+let test_rigid =
+  TmLetAnnot("height", ([-2; -1], TyArrow(TyCstr("gtree", [TyVar (-2); TyVar (-1)]), TyVar (-1))),
+             TmAbs("t", TmFlatMatchWith(TmVar "t",
+                                        [(FlPCstr("Leaf", ["nil"]), TmFold(TmCstr "Z", TmConst(TmUnit)));
+                                         (FlPCstr("Node", ["l"; "x"; "r"]), TmFold(TmCstr "S", TmApp(TmVar "height", TmVar "l")))])), TmVar "height")
+
+
+
+let test_rigid2 =
+  TmLetAnnot("swivel", ([-2; -1], TyArrow(TyCstr("gtree", [TyVar (-2); TyVar (-1)]), TyCstr("gtree", [TyVar (-2); TyVar (-1)]))),
+             TmAbs("t", TmFlatMatchWith(TmVar "t",
+                                        [(FlPCstr("Leaf", ["nil"]), TmFold(TmCstr "Leaf", TmConst(TmUnit)));
+                                         (FlPCstr("Node", ["l"; "x"; "r"]), TmFold(TmCstr "Node", TmTuple[TmApp(TmVar "swivel", TmVar "r");
+                                                                                                         TmVar "x"; TmApp(TmVar "swivel", TmVar "l")]))])), TmVar "swivel")
+let test_rigid3 =
+  TmLetAnnot("height", ([-2; -1], TyArrow(TyCstr("gtree", [TyVar (-2); TyVar (-1)]), TyVar (-1))),
+             TmAbs("t", TmFlatMatchWith(TmVar "t",
+                                        [(FlPCstr("Leaf", ["nil"]), TmFold(TmCstr "Z", TmConst(TmUnit)));
+                                         (FlPCstr("Node", ["l"; "x"; "r"]), TmFold(TmCstr "S", TmApp(TmVar "height", TmVar "l")))])), TmApp(TmVar "height", test_tree))
+
+let test_rigid4 =
+  TmLetAnnot("height", ([-2; -1], TyArrow(TyCstr("gtree", [TyVar (-2); TyVar (-1)]), TyVar (-1))),
+             TmAbs("t", TmFlatMatchWith(TmVar "t",
+                                        [(FlPCstr("Leaf", ["nil"]), TmFold(TmCstr "Z", TmConst(TmUnit)));
+                                         (FlPCstr("Node", ["l"; "x"; "r"]), TmFold(TmCstr "S", TmApp(TmVar "height", TmVar "l")))])), TmApp(TmVar "height", test3_tree))
+
+let test_rigid5 =
+  TmLetAnnot("swivel", ([-2; -1], TyArrow(TyCstr("gtree", [TyVar (-2); TyVar (-1)]), TyCstr("gtree", [TyVar (-2); TyVar (-1)]))),
+             TmAbs("t", TmFlatMatchWith(TmVar "t",
+                                        [(FlPCstr("Leaf", ["nil"]), TmFold(TmCstr "Leaf", TmConst(TmUnit)));
+                                         (FlPCstr("Node", ["l"; "x"; "r"]), TmFold(TmCstr "Node", TmTuple[TmApp(TmVar "swivel", TmVar "r");
+                                                                                                         TmVar "x"; TmApp(TmVar "swivel", TmVar "l")]))])), TmApp(TmVar "swivel", test3_tree))
