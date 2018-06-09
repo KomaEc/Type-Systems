@@ -156,8 +156,8 @@ let freeVarsEnv l = delete_duplicates (
     List.fold_right (fun bnd fvs ->
         match bnd with
           VarBind(_, _, pty) -> freeVarsPolyTy pty @ fvs
-        | _ -> fvs) l []
-  )
+        | _ -> fvs) l [])
+
 
 
 let make_env x m y = ([VarBind(x,m,y)]: env)
@@ -183,6 +183,9 @@ let rec substitute (ie : tyVar * monoTy) (ty : monoTy) : monoTy =
   | TyArrow(ty1, ty2) -> TyArrow(substitute ie ty1, substitute ie ty2)
   | TyTuple typelist -> TyTuple(List.map (fun t -> substitute ie t) typelist)
   | _ -> ty
+
+let restriction (tys : monoTy list) (sub : substitution) =
+  List.filter (fun (t, _) -> not (List.mem (TyVar t) tys)) sub
 
 let subst_fun (s : substitution) : tyVar -> monoTy =
   fun i ->
@@ -248,6 +251,12 @@ let app_env s (gamma : env) =
   ((List.map (fun bnd ->
        match bnd with
          VarBind(x, m, polyTy) -> VarBind(x, m, app_polyTy s polyTy)
+       | _ -> bnd) gamma) : env)
+
+let app_refine_env s (gamma : env) =
+  ((List.map (fun bnd ->
+       match bnd with
+         VarBind(x, R, polyTy) -> VarBind(x, R, app_polyTy s polyTy)
        | _ -> bnd) gamma) : env)
 
 let rec occur (i : tyVar) (mty : monoTy) : bool =
@@ -428,8 +437,8 @@ let rec string_of_type = function
        [] -> "()"
      | mty :: mtys ->
        "(" ^ (string_of_type mty) ^ (List.fold_left (fun acc mty -> acc ^ " * " ^ (string_of_type mty)) "" mtys) ^ ")")
-  | TyVar i -> index2string i
-  | TyArrow (t1, t2) -> string_of_type t1 ^ paren_string_of_type t2
+  | TyVar i -> (if i < 0 then "'" ^ (index2string (-i)) else index2string i)
+  | TyArrow (t1, t2) -> string_of_type t1  ^ " -> " ^ string_of_type t2
   | TyCstr (label, mtyl) ->
     (match mtyl with
        [] -> ""
