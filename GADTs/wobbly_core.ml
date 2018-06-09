@@ -27,9 +27,21 @@ let rec unify eqlst : substitution option =
 
 exception SomethingWrong of int
 
+exception Todebug of term * env * modifiers * modifiers * monoTy * monoTy
+
+exception Todebug1 of monoTy * monoTy * term
+
+exception Todebug2 of substitution * monoTy * monoTy
+
 (* type inference algorithm -- algorithm J *)
 (* algorithm properties : [Gamma |- t : tau | sigma] iff
    [sigma_Gamma |- t : sigma_tau] *)
+
+
+
+
+
+
 let rec gather_term_subst (gamma : env) (t : term) (m : modifiers) (tau : monoTy)
     (fresh : uvargenerator) : substitution option * uvargenerator =
   match t with
@@ -217,7 +229,7 @@ and gather_matches_subst (gamma : env)
     [] -> Some cur_sub, fresh
   | (fpt, t)::res ->
     match gather_flpat_subst gamma fpt t mp mt taup tau fresh with
-      None, fresh -> raise (SomethingWrong 3)
+      None, fresh -> None, fresh
     | Some sigma, fresh ->
       gather_matches_subst
         (app_env sigma gamma) res mp mt
@@ -236,13 +248,10 @@ and gather_flpat_subst (gamma : env) (fpt : flat_pattern)
       assert (r = R);
       (match mp with
          W ->
-         let ftvs = delete_duplicates (List.fold_left
-                                         accumulate_freeVarsMonoTy [] tau2s) in
-         let alphaCs = List.filter (fun a -> List.mem a ftvs) alphas in
-         (match fresh_Instance (alphaCs, label_ins_ty) fresh with
+         (match fresh_Instance (alphas, label_ins_ty) fresh with
             (TyArrow(tau1s, (TyCstr(cstr_name, tau2s) as ty))), fresh ->
             (match unify [ty, taup] with
-               None -> None, fresh
+               None -> raise (SomethingWrong 123)
              | Some theta ->
                (try let pat_env =
                       (match tau1s with
@@ -254,11 +263,36 @@ and gather_flpat_subst (gamma : env) (fpt : flat_pattern)
                                                 | _ -> raise (Invalid_argument "")) in
                   let pat_env = List.map (fun (x, ty) -> VarBind(x, W, ty)) pat_env in
                   (match gather_term_subst (sum_env pat_env gamma) t mt tau fresh with
-                     None, fresh -> None, fresh
+                     None, fresh -> raise (SomethingWrong 124)
                    | Some sigma, fresh -> Some (subst_compose sigma theta), fresh)
-                with _ -> None, fresh))
+                with _ -> raise (SomethingWrong 125)))
           | _ -> failwith "impossible")
-       | R -> failwith "unimplemented")
+       | R ->
+         (match fresh_Instance (alphas, label_ins_ty) fresh with
+            (TyArrow(tau1s, (TyCstr(cstr_name, tau2s) as ty))), fresh ->
+            (match unify [ty, taup] with
+               None -> raise (Todebug1 (ty, taup, t))
+             | Some theta ->
+               (try let pat_env =
+                      (match tau1s with
+                         TyTuple(tau1s) -> (try List.combine bindlist
+                                                  (List.map (fun mty -> monoTy2polyTy (app_monoTy theta mty))
+                                                     tau1s)
+                                            with _ as excep -> raise excep)
+                       | _ -> match bindlist with [x] -> [x, monoTy2polyTy (app_monoTy theta tau1s)]
+                                                | _ -> raise (Invalid_argument "")) in
+                  let pat_env = List.map (fun (x, ty) -> VarBind(x, R, ty)) pat_env in
+                  (match gather_term_subst
+                           (sum_env pat_env (app_refine_env theta gamma))
+                           t mt
+                           (match mt with R -> app_monoTy theta tau
+                                        | W -> tau) fresh with
+                    None, fresh -> raise (Todebug (t, gamma, mp, mt, taup, tau))
+(* we don't need the substitution and refinement. Notice that
+   we are not going to infer a type, but to check a type *)
+                  | Some sigma, fresh -> Some [], fresh)
+                with _ as excp -> raise excp))
+          | _ -> failwith "impossible"))
     | _ -> raise (SomethingWrong 100)
 
 
@@ -274,6 +308,53 @@ and gather_iter_terms (gamma : env) (tl : term list) (m : modifiers) (cur_sub : 
       gather_iter_terms (app_env sigma gamma) ts m (subst_compose sigma cur_sub)
         (tau :: cur_tyl) fresh
 
+
+let rec refresh_for acc sub alphas fresh =
+  match alphas with
+    [] -> acc, sub, fresh
+  | a :: als -> let (NextUVar(tau, fresh)) = fresh () in
+    match tau with
+      TyVar i -> refresh_for (i :: acc) ((a, TyVar i) :: sub) als fresh
+    | _ -> failwith "impossible"
+
+let rec legitify (fresh : uvargenerator) = function
+    TmBinOp(b, t1, t2) -> let (t1', fresh) = legitify fresh t1 in
+    let (t2', fresh) = legitify fresh t2 in
+    (TmBinOp(b, t1', t2'), fresh)
+  | TmMonOp(m, t) -> let (t', fresh) = legitify fresh t in
+    (TmMonOp(m, t'), fresh)
+  | TmIf(t1, t2, t3) -> let (t1', fresh) = legitify fresh t1 in
+    let (t2', fresh) = legitify fresh t2 in
+    let (t3', fresh) = legitify fresh t3 in
+    (TmIf(t1', t2', t3'), fresh)
+  | TmFold(t1, t2) -> let (t1', fresh) = legitify fresh t1 in
+    let (t2', fresh) = legitify fresh t2 in
+    (TmFold(t1', t2'), fresh)
+  | TmTuple tl -> let (tl', fresh) = legitifyTs fresh tl in
+    (TmTuple tl', fresh)
+  | TmAbs(x, t) -> let (t', fresh) = legitify fresh t in
+    (TmAbs(x, t'), fresh)
+  | TmApp(t1, t2) -> let (t1', fresh) = legitify fresh t1 in
+    let (t2', fresh) = legitify fresh t2 in
+    (TmApp(t1', t2'), fresh)
+  | TmLet(x, t1, t2) -> let (t1', fresh) = legitify fresh t1 in
+    let (t2', fresh) = legitify fresh t2 in
+    (TmLet(x, t1', t2'), fresh)
+  | TmFlatMatchWith(t, fptl) -> let (fl, tl) = List.split fptl in
+    let (t', fresh) = legitify fresh t in
+    let (tl', fresh) = legitifyTs fresh tl in
+    (TmFlatMatchWith(t', List.combine fl tl'), fresh)
+  | TmLetAnnot(x, (alphas, mty), t1, t2) ->
+    let (alphas', subst, fresh) = refresh_for [] [] alphas fresh in
+    let (t1', fresh) = legitify fresh t1 in
+    let (t2', fresh) = legitify fresh t2 in
+    (TmLetAnnot(x, (alphas', (app_monoTy subst mty)), t1', t2'), fresh)
+  | tm -> (tm, fresh)
+and legitifyTs (fresh : uvargenerator) = function
+    [] -> ([], fresh)
+  | t :: ts -> let (t', fresh) = legitify fresh t in
+    let (ts', fresh) = legitifyTs fresh ts in
+    (t' :: ts', fresh)
 
 let gather_subst (gamma : env) (t : term) =
   let (NextUVar(ty, fresh)) = uvargen () in
@@ -351,6 +432,10 @@ let rec eval1  = function
   | TmLet(x, t1, t2) when isval t1 ->
     termSubstOp x (TmFix(TmAbs(x, t1))) t2
   | TmLet(x, t1, t2) ->
+    TmLet(x, eval1 t1, t2)
+  | TmLetAnnot(x, _, t1, t2) when isval t1 ->
+    termSubstOp x (TmFix(TmAbs(x, t1))) t2
+  | TmLetAnnot(x, _, t1, t2) ->
     TmLet(x, eval1 t1, t2)
   | TmFlatMatchWith(TmFold(TmCstr(cstr_name), t2), fptl) ->
     let rec find_matches fptl =
