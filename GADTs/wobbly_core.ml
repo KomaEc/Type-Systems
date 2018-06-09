@@ -317,60 +317,63 @@ let rec refresh_for acc sub alphas fresh =
       TyVar i -> refresh_for (i :: acc) ((a, TyVar i) :: sub) als fresh
     | _ -> failwith "impossible"
 
-let rec legitify (fresh : uvargenerator) = function
-    TmBinOp(b, t1, t2) -> let (t1', fresh) = legitify fresh t1 in
-    let (t2', fresh) = legitify fresh t2 in
+let rec legitify (fresh : uvargenerator) (cur_sub : substitution)= function
+    TmBinOp(b, t1, t2) -> let (t1', fresh) = legitify fresh cur_sub t1 in
+    let (t2', fresh) = legitify fresh cur_sub t2 in
     (TmBinOp(b, t1', t2'), fresh)
-  | TmMonOp(m, t) -> let (t', fresh) = legitify fresh t in
+  | TmMonOp(m, t) -> let (t', fresh) = legitify fresh cur_sub t in
     (TmMonOp(m, t'), fresh)
-  | TmIf(t1, t2, t3) -> let (t1', fresh) = legitify fresh t1 in
-    let (t2', fresh) = legitify fresh t2 in
-    let (t3', fresh) = legitify fresh t3 in
+  | TmIf(t1, t2, t3) -> let (t1', fresh) = legitify fresh cur_sub t1 in
+    let (t2', fresh) = legitify fresh cur_sub t2 in
+    let (t3', fresh) = legitify fresh cur_sub t3 in
     (TmIf(t1', t2', t3'), fresh)
-  | TmFold(t1, t2) -> let (t1', fresh) = legitify fresh t1 in
-    let (t2', fresh) = legitify fresh t2 in
+  | TmFold(t1, t2) -> let (t1', fresh) = legitify fresh cur_sub t1 in
+    let (t2', fresh) = legitify fresh cur_sub t2 in
     (TmFold(t1', t2'), fresh)
-  | TmTuple tl -> let (tl', fresh) = legitifyTs fresh tl in
+  | TmTuple tl -> let (tl', fresh) = legitifyTs fresh cur_sub tl in
     (TmTuple tl', fresh)
-  | TmAbs(x, t) -> let (t', fresh) = legitify fresh t in
+  | TmAbs(x, t) -> let (t', fresh) = legitify fresh cur_sub t in
     (TmAbs(x, t'), fresh)
-  | TmApp(t1, t2) -> let (t1', fresh) = legitify fresh t1 in
-    let (t2', fresh) = legitify fresh t2 in
+  | TmApp(t1, t2) -> let (t1', fresh) = legitify fresh cur_sub t1 in
+    let (t2', fresh) = legitify fresh cur_sub t2 in
     (TmApp(t1', t2'), fresh)
-  | TmLet(x, t1, t2) -> let (t1', fresh) = legitify fresh t1 in
-    let (t2', fresh) = legitify fresh t2 in
+  | TmLet(x, t1, t2) -> let (t1', fresh) = legitify fresh cur_sub t1 in
+    let (t2', fresh) = legitify fresh cur_sub t2 in
     (TmLet(x, t1', t2'), fresh)
   | TmFlatMatchWith(t, fptl) -> let (fl, tl) = List.split fptl in
-    let (t', fresh) = legitify fresh t in
-    let (tl', fresh) = legitifyTs fresh tl in
+    let (t', fresh) = legitify fresh cur_sub t in
+    let (tl', fresh) = legitifyTs fresh cur_sub tl in
     (TmFlatMatchWith(t', List.combine fl tl'), fresh)
   | TmLetAnnot(x, (alphas, mty), t1, t2) ->
+    let (alphas, mty) = app_polyTy cur_sub (alphas, mty) in
     let (alphas', subst, fresh) = refresh_for [] [] alphas fresh in
-    let (t1', fresh) = legitify fresh t1 in
-    let (t2', fresh) = legitify fresh t2 in
+    let sub = subst_compose subst cur_sub in
+    let (t1', fresh) = legitify fresh sub t1 in
+    let (t2', fresh) = legitify fresh sub t2 in
     (TmLetAnnot(x, (alphas', (app_monoTy subst mty)), t1', t2'), fresh)
   | tm -> (tm, fresh)
-and legitifyTs (fresh : uvargenerator) = function
+and legitifyTs (fresh : uvargenerator) (cur_sub : substitution)= function
     [] -> ([], fresh)
-  | t :: ts -> let (t', fresh) = legitify fresh t in
-    let (ts', fresh) = legitifyTs fresh ts in
+  | t :: ts -> let (t', fresh) = legitify fresh cur_sub t in
+    let (ts', fresh) = legitifyTs fresh cur_sub ts in
     (t' :: ts', fresh)
 
 let gather_subst (gamma : env) (t : term) =
-  let (NextUVar(ty, fresh)) = uvargen () in
+  let (t', fresh) = legitify uvargen [] t in
+  let (NextUVar(ty, fresh)) = fresh () in
   let result =
-    match gather_term_subst gamma t W ty fresh  with
+    match gather_term_subst gamma t' W ty fresh  with
       None, _ -> None
     | Some sigma, _ -> match ty with
         TyVar n -> Some (subst_fun sigma)
       | _ -> None in
-  result
+  result, ty
 
 let infer (gamma : env) (t : term) : monoTy option =
   match gather_subst gamma t with
-    None -> None
-  | Some sigma -> Some (sigma 1)
-
+    None, _ -> None
+  | Some sigma, (TyVar i) -> Some (sigma i)
+  | _ -> failwith "impossible"
 
 
 (*  evaluation *)
