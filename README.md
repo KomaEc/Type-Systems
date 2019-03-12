@@ -6,7 +6,7 @@ This repository consists of implementations of some advanced type systems (mainl
 
 # To Use
 
-I didn't implement lexer and parser. So the input must be an AST. The 3 files with suffix "_simple" form an inferencer not supporting GADT.
+I didn't implement lexer or parser. So the input must be an AST. The 3 files with suffix "_simple" form an inferencer not supporting GADT.
 
 
 # References 
