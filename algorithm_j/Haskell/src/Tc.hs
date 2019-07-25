@@ -79,10 +79,16 @@ module Tc where
                         writeSTRef ref2 (Link ty1)
                     else
                         writeSTRef ref1 (Link ty2)
-            unify' ty (TVar ref) = lift $ writeSTRef ref (Link ty) -- lack occur check !!!
+            unify' ty (TVar ref) = lift $ do
+                 tv <- readSTRef ref
+                 occur tv ty
+                 writeSTRef ref (Link ty) -- lack occur check !!!
             unify' ty1@(TVar _) ty2 = unify' ty2 ty1
             unify' (TArrow tyl1 tyl2) (TArrow tyr1 tyr2) = do
                 unify' tyl1 tyr1
                 unify' tyl2 tyr2
+            occur :: TVar s -> Type s -> ST s ()
+            occur = undefined
+
 
 
