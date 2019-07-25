@@ -5,10 +5,10 @@ type name = string
 type ty = 
   | TConst of type_const
   | TVar of tv ref
-  | TArrow of ty * ty * levels
+  | TArrow of ty * ty
   [@@deriving sexp, show]
 and tv = Unbound of string * level | Link of ty [@@deriving sexp, show]
-and levels = { mutable level_old : level; mutable level_new : level } [@@deriving sexp, show]
+(* and levels = { mutable level_old : level; mutable level_new : level } [@@deriving sexp, show] *)
 and type_const = name (* currently, type constant is represented by name  *)
     [@@deriving sexp, show]
 
