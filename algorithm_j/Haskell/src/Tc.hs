@@ -63,27 +63,26 @@ module Tc where
     tcState0 :: TcState
     tcState0 = TcState initLevel defaultSupply
 
-
     unify :: Type s -> Type s -> Infer s ()
-    unify ty1 ty2 = lift . lift . ExceptT $ do
-                    ty1' <- repr ty1
-                    ty2' <- repr ty2
-                    unify' ty1' ty2'
+    unify ty1 ty2 = lift . lift $ do
+                     ty1' <- lift $ repr ty1
+                     ty2' <- lift $ repr ty2
+                     unify' ty1' ty2'
         where
-            unify' :: Type s -> Type s -> ST s (Either (TypeError s) ())
+            unify' :: Type s -> Type s -> ExceptT (TypeError s) (ST s) ()
             unify' ty1@(TVar ref1) ty2@(TVar ref2) 
-                | ref1 == ref2 = return $ Right ()
-                | otherwise    = do
+                | ref1 == ref2 = return ()
+                | otherwise    = lift $ do
                     Unbound l1 x <- readSTRef ref1
                     Unbound l2 y <- readSTRef ref2
-                    if l1 < l2 then -- unify to the lower level
-                        Right <$> writeSTRef ref2 (Link ty1)
+                    if l1 < l2 then
+                        writeSTRef ref2 (Link ty1)
                     else
-                        Right <$> writeSTRef ref1 (Link ty2)
-            unify' ty (TVar ref) = do
-                Unbound l ty' <- readSTRef ref
-                Right <$> writeSTRef ref (Link ty)
-            unify' ref@(TVar _) ty = unify' ty ref
-            
-    
+                        writeSTRef ref1 (Link ty2)
+            unify' ty (TVar ref) = lift $ writeSTRef ref (Link ty) -- lack occur check !!!
+            unify' ty1@(TVar _) ty2 = unify' ty2 ty1
+            unify' (TArrow tyl1 tyl2) (TArrow tyr1 tyr2) = do
+                unify' tyl1 tyr1
+                unify' tyl2 tyr2
+
 
