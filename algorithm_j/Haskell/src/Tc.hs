@@ -1,5 +1,4 @@
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE TupleSections #-}
 
 module Tc where
 
@@ -136,4 +135,26 @@ module Tc where
         return $ TArrow ty1' ty2'
     generalize ty = return ty
 
+    typeOf :: Expr -> Infer s (Type s)
+    typeOf (Var x) = do
+        r <- ask
+        case Data.Map.lookup x r of
+            Just ty -> return $ instantiate ty
+            Nothing -> undefined -- ?? what's the correct behaviour
+    typeOf (Lam x expr) = do
+        tyVar <- newTypeVar
+        local (insert x tyVar) $ typeOf expr
+    typeOf (App expr1 expr2) = do
+        ty1 <- typeOf expr1
+        ty2 <- typeOf expr2
+        tyVar <- newTypeVar
+        unify ty1 $ ty2 `TArrow` tyVar
+        return tyVar
+    typeOf (Let x expr1 expr2) = do
+        enterLevel
+        ty <- typeOf expr1
+        leaveLevel
+        ty' <- generalize ty
+        local (insert x ty') $ typeOf expr2
 
+    instantiate = undefined

@@ -8,7 +8,7 @@ module Syntax (Name, Expr(..)) where
         Var :: Name -> Expr
         App :: Expr -> Expr -> Expr
         Lam :: String -> Expr -> Expr
-        Let :: String -> Expr -> Expr
+        Let :: String -> Expr -> Expr -> Expr
         deriving (Show, Eq)
 
     
