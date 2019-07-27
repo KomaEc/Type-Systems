@@ -126,7 +126,7 @@ module Tc where
         case tv of
             Unbound l' x 
                 | l < l'    -> do 
-                    lift . lift . lift $ writeSTRef ref $ Unbound genericLevel x
+                    lift . lift . lift . writeSTRef ref $ Unbound genericLevel x
                     return ty
                 | otherwise -> return ty
             Link ty'        -> generalize ty'
@@ -141,7 +141,7 @@ module Tc where
         r <- ask
         case Data.Map.lookup x r of
             Just ty -> return $ instantiate ty
-            Nothing -> lift . lift $ throwError $ UnboundVariable x
+            Nothing -> lift . lift . throwError $ UnboundVariable x
     typeOf (Lam x expr) = do
         tyVar <- newTypeVar
         local (insert x tyVar) $ typeOf expr
