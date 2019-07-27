@@ -19,6 +19,7 @@ module Tc where
     data TypeError s
         = OccurCheck (TVar s) (Type s)
         | UnificationError (Type s) (Type s)
+        | UnboundVariable Name
         | PlayGround
 
     data TcState = TcState {
@@ -32,8 +33,8 @@ module Tc where
                    (ExceptT (TypeError s)
                    (ST s)))
 
-    runInferST :: Env (Type s) -> Infer s a -> ST s (Either (TypeError s) a)
-    runInferST r m = runReaderT m r -- `|>` in OCaml
+    runInferST :: Infer s a -> ST s (Either (TypeError s) a)
+    runInferST m = runReaderT m empty -- `|>` in OCaml
                    & flip evalStateT tcState0
                    & runExceptT
 
@@ -140,7 +141,7 @@ module Tc where
         r <- ask
         case Data.Map.lookup x r of
             Just ty -> return $ instantiate ty
-            Nothing -> undefined -- ?? what's the correct behaviour
+            Nothing -> lift . lift $ throwError $ UnboundVariable x
     typeOf (Lam x expr) = do
         tyVar <- newTypeVar
         local (insert x tyVar) $ typeOf expr

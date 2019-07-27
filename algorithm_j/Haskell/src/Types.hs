@@ -32,7 +32,3 @@ module Types where
             Unbound _ _ -> return ty
             Link ty' -> repr ty'
     repr ty = return ty
-
-
-    
-    

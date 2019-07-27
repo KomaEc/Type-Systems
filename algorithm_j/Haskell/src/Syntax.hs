@@ -10,5 +10,3 @@ module Syntax (Name, Expr(..)) where
         Lam :: String -> Expr -> Expr
         Let :: String -> Expr -> Expr -> Expr
         deriving (Show, Eq)
-
-    
