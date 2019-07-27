@@ -19,6 +19,7 @@ module Tc where
 
     data TypeError s
         = OccurCheck (TVar s) (Type s)
+        | UnificationError (Type s) (Type s)
         | PlayGround
 
     data TcState = TcState {
@@ -64,13 +65,15 @@ module Tc where
     tcState0 = TcState initLevel defaultSupply
 
     unify :: Type s -> Type s -> Infer s ()
-    unify ty1 ty2 = lift . lift $ do
-                     ty1' <- lift $ repr ty1
-                     ty2' <- lift $ repr ty2
-                     unify' ty1' ty2'
+    unify ty1 ty2 = lift . lift $ unify' ty1 ty2
         where
-            unify' :: Type s -> Type s -> ExceptT (TypeError s) (ST s) ()
-            unify' ty1@(TVar ref1) ty2@(TVar ref2) 
+            unify', unify'' :: Type s -> Type s -> ExceptT (TypeError s) (ST s) ()
+            unify' ty1 ty2 = do
+                ty1' <- lift $ repr ty1
+                ty2' <- lift $ repr ty2
+                unify'' ty1' ty2'
+
+            unify'' ty1@(TVar ref1) ty2@(TVar ref2)
                 | ref1 == ref2 = return ()
                 | otherwise    = lift $ do
                     Unbound l1 x <- readSTRef ref1
@@ -79,25 +82,32 @@ module Tc where
                         writeSTRef ref2 (Link ty1)
                     else
                         writeSTRef ref1 (Link ty2)
-            unify' ty (TVar ref) = do
-                 occur ref ty
-                 lift $ writeSTRef ref (Link ty)
-            unify' ty1@(TVar _) ty2 = unify' ty2 ty1
-            unify' (TArrow tyl1 tyl2) (TArrow tyr1 tyr2) = do
-                unify' tyl1 tyr1
+            unify'' ty1 ty2@(TVar ref) = do -- note, here ref must be Unbound
+                occurs ref ty1
+                lift $ writeSTRef ref (Link ty1)
+            unify'' ty1@(TVar _) ty2 = unify'' ty2 ty1
+            unify'' (TArrow tyl1 tyl2) (TArrow tyr1 tyr2) = do
+                unify' tyl1 tyr1 -- handle recursive cases
                 unify' tyl2 tyr2
-            occur :: STRef s (TVar s) -> Type s -> ExceptT (TypeError s) (ST s) ()
-            occur ref ty@(TVar ref')
+            unify'' ty1 ty2 = throwError $ UnificationError ty1 ty2
+
+            occurs, occurs' :: STRef s (TVar s) -> Type s -> ExceptT (TypeError s) (ST s) () -- invariant :: ref must be Unbound
+            occurs ref ty = do
+                ty' <- lift $ repr ty
+                occurs' ref ty'
+
+            occurs' ref ty@(TVar ref')
                 | ref == ref' = do
                     tv <- lift $ readSTRef ref
-                    throwError (OccurCheck tv ty)
+                    throwError $ OccurCheck tv ty
                 | otherwise   = lift $ do
-                    Unbound l x <- readSTRef ref -- notice !!!!! pattern matching incomplete !
-                    Unbound l' _ <- readSTRef ref'
-                    writeSTRef ref (Unbound (min l l') x) -- adjust level !!
-            occur ref (TArrow ty1 ty2) = do
-                occur ref ty1
-                occur ref ty2 
+                    Unbound l1 _ <- readSTRef ref
+                    Unbound l2 y <- readSTRef ref'
+                    writeSTRef ref' $ Unbound (l1 `min` l2) y -- adjust level!
+            occurs' ref (TArrow ty1 ty2) = do
+                occurs ref ty1 -- apply the same trick
+                occurs ref ty2
+
 
 
 
