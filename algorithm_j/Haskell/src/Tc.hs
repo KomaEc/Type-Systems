@@ -62,6 +62,12 @@ module Tc where
         modify $ over newNames tail
         return (head names)
 
+    newTypeVar :: Infer s (Type s)
+    newTypeVar = do
+        l <- currentLevel
+        x <- getNewName
+        lift . lift . lift . fmap TVar . newSTRef $ Unbound l x
+
     defaultSupply :: [Name]
     defaultSupply = [1..] >>= flip replicateM ['a'..'z']
 
