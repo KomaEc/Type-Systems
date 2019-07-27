@@ -49,6 +49,10 @@ module Tc where
     leaveLevel = lift $
                     modify (over typeLevel $ \x -> x - 1)
 
+    currentLevel :: Infer s Level
+    currentLevel = lift $
+                    use typeLevel
+
     initLevel :: Level
     initLevel = 1
 
@@ -109,5 +113,21 @@ module Tc where
                 occurs ref ty2
 
 
+    generalize :: Type s -> Infer s (Type s)
+    generalize ty@(TVar ref) = do
+        tv <- lift . lift . lift $ readSTRef ref
+        l <- currentLevel
+        case tv of
+            Unbound l' x 
+                | l < l'    -> do 
+                    lift . lift . lift $ writeSTRef ref $ Unbound genericLevel x
+                    return ty
+                | otherwise -> return ty
+            Link ty'        -> generalize ty'
+    generalize (TArrow ty1 ty2) = do
+        ty1' <- generalize ty1
+        ty2' <- generalize ty2
+        return $ TArrow ty1' ty2'
+    generalize ty = return ty
 
 
