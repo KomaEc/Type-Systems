@@ -21,6 +21,7 @@ module Tc where
         | UnificationError (Type s) (Type s)
         | UnboundVariable Name
         | PlayGround
+        deriving Show
 
     data TcState = TcState {
         _typeLevel :: Level
@@ -37,6 +38,15 @@ module Tc where
     runInferST m = runReaderT m empty -- `|>` in OCaml
                    & flip evalStateT tcState0
                    & runExceptT
+
+{-
+    runInfer :: Infer s a -> Either String a
+    runInfer m = runReaderT m empty
+               & flip evalStateT tcState0
+               & runExceptT
+               & fmap (either (Left . show) Right)
+               & runST
+-}
 
     genericLevel :: Level
     genericLevel = 10000000000
@@ -140,7 +150,7 @@ module Tc where
     typeOf (Var x) = do
         r <- ask
         case Data.Map.lookup x r of
-            Just ty -> return $ instantiate ty
+            Just ty -> instantiate ty
             Nothing -> lift . lift . throwError $ UnboundVariable x
     typeOf (Lam x expr) = do
         tyVar <- newTypeVar
@@ -158,4 +168,5 @@ module Tc where
         ty' <- generalize ty
         local (insert x ty') $ typeOf expr2
 
+    instantiate :: Type s -> Infer s (Type s)
     instantiate = undefined
