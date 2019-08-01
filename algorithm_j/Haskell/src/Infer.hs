@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 
-module Tc where
+module Infer where
 
     import Syntax
     import Types
@@ -169,4 +169,11 @@ module Tc where
         local (insert x ty') $ typeOf expr2
 
     instantiate :: Type s -> Infer s (Type s)
-    instantiate = undefined
+    instantiate = flip runReader empty . loop
+        where
+            readRef :: STRef s a -> Infer s a
+            readRef = lift . lift . lift . readSTRef
+            writeRef :: STRef s a -> a -> Infer s ()
+            writeRef ref = lift . lift . lift . writeSTRef ref
+            loop :: Type s -> Reader (Map Name (Type s)) (Infer s (Type s))
+            loop = undefined
