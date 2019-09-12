@@ -1,34 +1,30 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE RankNTypes #-}
 
 module Types where
 
-    import Data.STRef
-    import Control.Monad.ST
+    import Data.IORef
     import Syntax
+    import Control.Monad.IO.Class
 
     type Level = Int
 
-    instance Show (STRef s (TVar s)) where
-        show _ = "some ref"
+    data Type where
+        TConst :: Name -> Type
+        TApp :: Type -> Type -> Type
+        TArrow :: Type -> Type -> Type
+        TVar :: IORef TVar -> Type
+        deriving Eq
 
-    data Type s where -- phantom type s stands for state thread
-        TConst :: Name -> Type s -- type constant: `int` or `bool`
-        TApp :: Type s -> Type s -> Type s -- type application: `list[int]`
-        TArrow :: Type s -> Type s -> Type s -- function type: `(int, int) -> int`
-        TVar :: STRef s (TVar s) -> Type s
-        deriving (Show, Eq)
+    data TVar where
+        Unbound :: Level -> String -> TVar
+        Link :: Type -> TVar
+        deriving Eq
 
-    data TVar s where
-        Unbound :: Level -> String -> TVar s
-        Link :: Type s -> TVar s
-        deriving (Show, Eq)
-
-    repr :: Type s -> ST s (Type s)
+    repr :: (MonadIO m) => Type -> m Type
     repr ty@(TVar ref) = do
-        tvar <- readSTRef ref
-        case tvar of
+        tvar <- liftIO $ readIORef ref
+        case tvar of 
             Unbound _ _ -> return ty
             Link ty' -> repr ty'
     repr ty = return ty
