@@ -1,7 +1,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE FlexibleInstances #-}
 
-module Types' where
+module MTL.Types' where
 
     import Data.STRef
     import Control.Monad.ST

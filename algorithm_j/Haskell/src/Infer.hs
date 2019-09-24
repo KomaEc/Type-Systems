@@ -2,7 +2,9 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ConstraintKinds #-}
 
+
 module Infer where
+
 
     import Syntax
     import Types
@@ -20,7 +22,6 @@ module Infer where
 
     data TypeError =
         OccurCheck TVar Type
-      | UnificationError Type Type
       | UnboundVariable Name
       | PlayGround
 
@@ -35,10 +36,20 @@ module Infer where
                  ExceptT TypeError
                  IO))
 
-    type MonadInfer m = (MonadError TypeError m, MonadIO m, MonadReader (Env Type) m, MonadState TcState m)
+    runInfer :: Infer a -> IO (Either TypeError a)
+    runInfer m = runReaderT m empty
+               & flip evalStateT tcState0
+               & runExceptT
 
-    genericLevel :: Monad m => m Level
-    genericLevel = return 10000000000
+    type MonadInfer m = (
+        MonadError TypeError m
+      , MonadIO m
+      , MonadReader (Env Type) m
+      , MonadState TcState m
+      )
+
+    -- genericLevel :: Monad m => m Level
+    -- genericLevel = return 10000000000
 
     enterLevel :: MonadState TcState m => m ()
     enterLevel = modify (over typeLevel (+1))
@@ -62,7 +73,7 @@ module Infer where
     newTypeVar = do
         l <- currentLevel
         x <- getNewName
-        fmap TVar . newRef $ Unbound l x
+        fmap TVar . newRef $ Unbound x l
 
     defaultSupply :: [Name]
     defaultSupply = [1..] >>= flip replicateM ['a'..'z']
@@ -80,85 +91,89 @@ module Infer where
     newRef = liftIO . newIORef
 
     unify :: (MonadError TypeError m, MonadIO m) => Type -> Type -> m ()
-    unify ty1 ty2 = do
-        ty1' <- repr ty1
-        ty2' <- repr ty2
-        unify' ty1' ty2' 
-        where
-            unify' :: (MonadError TypeError m, MonadIO m) => Type -> Type -> m ()
-            unify' ty1@(TVar ref1) ty2@(TVar ref2)
-                | ref1 == ref2 = return ()
-                | otherwise    = do
-                    Unbound l1 x <- readRef ref1
-                    Unbound l2 y <- readRef ref2
-                    if l1 < l2 then
-                        writeRef ref2 (Link ty1)
-                    else
-                        writeRef ref1 (Link ty2)
-            unify' ty1 ty2@(TVar ref) = do
-                occurs ref ty1
-                writeRef ref (Link ty1)
-            unify' ty1@(TVar _) ty2 = unify' ty2 ty1
-            unify' (TArrow tyl1 tyl2) (TArrow tyr1 tyr2) = do
-                unify tyl1 tyr1
-                unify tyl2 tyr2
-            unify' ty1 ty2 = throwError $ UnificationError ty1 ty2
+    unify (TVar ref1) (TVar ref2) | ref1 == ref2 = return ()
+    unify (TVar ref) ty2 = do
+        tv <- readRef ref
+        case tv of 
+            Unbound x l -> do
+                occursCheck ref ty2
+                writeRef ref (Link ty2)
+            Link ty1    -> unify ty1 ty2
+    unify ty1 ty2@(TVar _) = unify ty2 ty1
+    unify (TArrow tyl1 tyl2) (TArrow tyr1 tyr2) = do
+        unify tyl1 tyr1
+        unify tyl2 tyr2
 
-            occurs, occurs' :: (MonadError TypeError m, MonadIO m) => IORef TVar -> Type -> m ()
-            occurs ref ty = do
-                ty' <- repr ty
-                occurs' ref ty'
+    occursCheck :: (MonadError TypeError m, MonadIO m) => IORef TVar -> Type -> m ()
+    occursCheck ref ty@(TVar ref') 
+            | ref == ref' = do
+                tv <- readRef ref
+                throwError (OccurCheck tv ty)
+            | otherwise   = do
+                Unbound x l <- readRef ref
+                tv <- readRef ref'
+                case tv of
+                    Unbound y l' -> writeRef ref' (Unbound y (l `min` l'))
+                    Link ty      -> occursCheck ref ty
+    occursCheck ref (TArrow ty1 ty2) = do
+        occursCheck ref ty1
+        occursCheck ref ty2
+    occursCheck ref (QVar _) = return () -- ??
 
-            occurs' ref ty@(TVar ref') 
-                | ref == ref' = do
-                    tv <- readRef ref
-                    throwError $ OccurCheck tv ty
-                | otherwise   = do
-                    Unbound l1 _ <- readRef ref
-                    Unbound l2 y <- readRef ref
-                    writeRef ref' $ Unbound (l1 `min` l2) y
-            occurs' ref (TArrow ty1 ty2) = do
-                occurs ref ty1
-                occurs ref ty2
-
-    generalize :: (MonadIO m, MonadState TcState m) => Type -> m Type
+    generalize :: (MonadState TcState m, MonadIO m) => Type -> m Type
     generalize ty@(TVar ref) = do
         tv <- readRef ref
-        l <- currentLevel
         case tv of
-            Unbound l' x
-                | l < l'    -> do
-                    gl <- genericLevel
-                    writeRef ref $ Unbound gl x
+            Unbound x l -> do
+                cl <- currentLevel
+                if l > cl then
+                    return (QVar x)
+                else
                     return ty
-                | otherwise -> return ty
-            Link ty'        -> generalize ty'
+            Link ty' -> generalize ty'
     generalize (TArrow ty1 ty2) = do
         ty1' <- generalize ty1
         ty2' <- generalize ty2
         return $ TArrow ty1' ty2'
+    generalize ty@(QVar _) = return ty
 
     typeOf :: MonadInfer m => Expr -> m Type
     typeOf (Var x) = do
-        r <- ask
-        case Data.Map.lookup x r of
+        env <- ask
+        case Data.Map.lookup x env of
             Just ty -> instantiate ty
-            Nothing -> throwError $ UnboundVariable x
-    typeOf (Lam x expr) = do
+            Nothing -> throwError (UnboundVariable x)
+    typeOf (App t1 t2) = do
+        ty1 <- typeOf t1
+        ty2 <- typeOf t2
+        tyRes <- newTypeVar
+        unify ty1 (TArrow ty2 tyRes)
+        return tyRes
+    typeOf (Lam x t) = do
         alpha <- newTypeVar
-        local (insert x alpha) $ typeOf expr
-    typeOf (App expr1 expr2) = do
-        ty1 <- typeOf expr1
-        ty2 <- typeOf expr2
-        alpha <- newTypeVar
-        unify ty1 $ ty2 `TArrow` alpha
-        return alpha
-    typeOf (Let x expr1 expr2) = do
+        ty <- local (insert x alpha) $ typeOf t
+        return $ TArrow alpha ty
+    typeOf (Let x t t') = do
         enterLevel
-        ty <- typeOf expr1
+        ty <- typeOf t
         leaveLevel
         ty' <- generalize ty
-        local (insert x ty') $ typeOf expr2
+        local (insert  x ty') $ typeOf t'
 
-    instantiate :: (MonadError TypeError m, MonadIO m) => Type -> m Type
-    instantiate = undefined
+    instantiate :: (MonadState TcState m, MonadIO m) => Type -> m Type
+    instantiate ty = fst <$> loop [] ty
+        where
+            loop subst (QVar x) = case Prelude.lookup x subst of
+                                    Just ty -> return (ty, subst)
+                                    Nothing -> do
+                                        ty <- newTypeVar
+                                        return (ty, (x, ty):subst)
+            loop subst ty@(TVar ref) = do
+                tv <- readRef ref
+                case tv of
+                    Unbound _ _ -> return (ty, subst)
+                    Link ty'    -> loop subst ty'
+            loop subst (TArrow ty1 ty2) = do
+                (ty1', subst) <- loop subst ty1
+                (ty2', subst) <- loop subst ty2
+                return (TArrow ty1' ty2', subst)

@@ -1,10 +1,10 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE FlexibleContexts #-}
 
-module Infer' where
+module MTL.Infer' where
 
     import Syntax
-    import Types'
+    import MTL.Types'
     import Control.Monad.State
     import Control.Monad.Reader
     import Control.Monad.Except
