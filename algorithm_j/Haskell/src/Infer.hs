@@ -158,7 +158,7 @@ module Infer where
         ty <- typeOf t
         leaveLevel
         ty' <- generalize ty
-        local (insert  x ty') $ typeOf t'
+        local (insert x ty') $ typeOf t'
 
     instantiate :: (MonadState TcState m, MonadIO m) => Type -> m Type
     instantiate ty = fst <$> loop [] ty

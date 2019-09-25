@@ -5,6 +5,8 @@ import Types
 import Syntax
 import Infer
 import Utils
+import Lexer
+import Parser
 
 example1 :: Expr
 example1 = Lam "x" $
@@ -18,6 +20,13 @@ example2 = Lam "x" $
 
 main :: IO ()
 main = do
-    Right ty <- runInfer $ typeOf example2
-    str <- showIO ty
-    putStrLn str
+    let exp = parse (scanTokens "lambda x -> let y = lambda z -> x in y")
+    print exp
+    putStrLn "type :"
+    mty <- runInfer $ typeOf exp
+    case mty of
+        Right ty -> do
+            str <- showIO ty
+            putStrLn str
+        Left e   -> 
+            putStrLn "Not Typeable"
