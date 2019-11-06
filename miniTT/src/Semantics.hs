@@ -31,11 +31,11 @@ data Value where
              , Eq )
 
 data Neutral where
-    NGeneric :: Int               -> Neutral
-    NApp     :: Neutral -> Value  -> Neutral
-    NFst     :: Neutral           -> Neutral
-    NSnd     :: Neutral           -> Neutral
-    NFun     :: CCls -> Neutral   -> Neutral
+    NeuGeneric :: Int               -> Neutral
+    NeuApp     :: Neutral -> Value  -> Neutral
+    NeuFst     :: Neutral           -> Neutral
+    NeuSnd     :: Neutral           -> Neutral
+    NeuFun     :: CCls -> Neutral   -> Neutral
     deriving ( Show
              , Eq )
 
@@ -54,8 +54,10 @@ data Rho where -- ρ = [] | ρ , p = V | ρ , p : A = M
     deriving ( Show
              , Eq )
 
+-- all the errors that handled in the semantics analysis phase.
 data Errors where
     VarNotInPattern :: Errors
+    deriving Show
 
 -- obtain the value of x from the pattern p that contains x and its value.
 proj :: MonadError Errors m => Pattern -> Value -> Name -> m Value
@@ -84,26 +86,28 @@ assertVarInPattern PatDummy _ = throwError VarNotInPattern
 -- v ~> v.1
 vfst :: Monad m => Value -> m Value
 vfst (VProduct v1 _) = return v1
-vfst (VNeutral n) = return $ VNeutral (NFst n)
+vfst (VNeutral n) = return $ VNeutral (NeuFst n)
 
 -- v ~> v.2
 vsnd :: Monad m => Value -> m Value
 vsnd (VProduct _ v2) = return v2
-vsnd (VNeutral n) = return $ VNeutral (NSnd n)
+vsnd (VNeutral n) = return $ VNeutral (NeuSnd n)
 
 -- application between values
--- questions : do we need scope check ?
 app :: MonadError Errors m => Value -> Value -> m Value
-app (VLam fcls) v                           = return $ inst fcls v
+app (VLam fcls) v                           = inst fcls v
 app (VCaseFun (choices, rho)) (VConstr c v) = -- construct a reader monad Rho -> m a
     let exp = fst . head $ filter (\ (x, _) -> x == c) choices
     in  do
             val <- runReaderT (eval exp) rho
             app val v
-app (VCaseFun ccls) (VNeutral n) = return . VNeutral $ NFun ccls n
-app (VNeutral n) v = return . VNeutral $ NApp n v
+app (VCaseFun ccls) (VNeutral n) = return . VNeutral $ NeuFun ccls n
+app (VNeutral n) v = return . VNeutral $ NeuApp n v
 
-inst = undefined
+-- instantiates a function closure to a value
+inst :: MonadError Errors m => FunCls -> Value -> m Value
+inst (Cl pat exp rho) v = runReaderT (eval exp) (RVar rho pat v)
+inst (ClCmp fcls c) v = inst fcls (VConstr c v)
 
 -- evaluate expression to its value
 class Eval a where
