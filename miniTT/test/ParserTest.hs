@@ -14,7 +14,7 @@ prog2 = "bool : U = Sum (True 1 | False 1)\n elimBool : Π c : bool → U . c (F
 
 testParser :: IO ()
 testParser = do
-    let exp1 = parse (scanTokens prog1)
-        exp2 = parse (scanTokens prog2)
-    print exp1
-    print exp2
+    let exp1 = parseExpr prog1
+        exp2 = parseExpr prog2
+    print $ show exp1
+    print $ show exp2

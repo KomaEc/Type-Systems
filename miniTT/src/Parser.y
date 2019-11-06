@@ -1,47 +1,49 @@
 {
-module Parser where
+module Parser ( parseExpr ) where
 import Lexer
 import Syntax
 import Control.Monad.Except
 }
 
 %name parse
-%tokentype { TokenClass }
-%monad { Except String } { (>>=) } { return }
-%error { parseError }
+%tokentype { Token }
+%monad { Alex }
+%lexer { lexwrap } { Token _ TokenEOF }
+-- Without this we get a type error
+%error { happyError }
 
 
 %token
-    lambda                      { TokenLam }
-    rec                         { TokenRec }
-    '→'                         { TokenArrow }
-    str                         { TokenVar $$ }
-    constr                      { TokenConstr $$ }
-    '='                         { TokenEq }
-    '('                         { TokenLParen }
-    ')'                         { TokenRParen }
-    '.'                         { TokenDot }
-    ':'                         { TokenColon }
-    ';'                         { TokenSemiColon }
-    'Π'                         { TokenPi }
-    'Σ'                         { TokenSigma }
-    ','                         { TokenComma }
-    fun                         { TokenFun }
-    sum                         { TokenSum }
-    '|'                         { TokenVBar }
-    '_'                         { TokenDummy }
-    zero                        { TokenZero }
-    one                         { TokenOne }
-    two                         { TokenTwo }
-    '×'                         { TokenTimes }
-    'U'                         { TokenU }
+    lambda                      { Token _ TokenLam }
+    rec                         { Token _ TokenRec }
+    '→'                         { Token _ TokenArrow }
+    str                         { Token _ (TokenVar $$) }
+    constr                      { Token _ (TokenConstr $$) }
+    '='                         { Token _ TokenEq }
+    '('                         { Token _ TokenLParen }
+    ')'                         { Token _ TokenRParen }
+    '.'                         { Token _ TokenDot }
+    ':'                         { Token _ TokenColon }
+    ';'                         { Token _ TokenSemiColon }
+    'Π'                         { Token _ TokenPi }
+    'Σ'                         { Token _ TokenSigma }
+    ','                         { Token _ TokenComma }
+    fun                         { Token _ TokenFun }
+    sum                         { Token _ TokenSum }
+    '|'                         { Token _ TokenVBar }
+    '_'                         { Token _ TokenDummy }
+    zero                        { Token _ TokenZero }
+    one                         { Token _ TokenOne }
+    two                         { Token _ TokenTwo }
+    '×'                         { Token _ TokenTimes }
+    'U'                         { Token _ TokenU }
 
 %nonassoc DOT_GUARD
 %nonassoc str lambda rec constr 'Π' 'Σ' fun sum zero one 'U' '('
 %left '|'
+%left '.'
 %right '→'
 %nonassoc '='
-%left '.'
 %left ',' '×'
 %left APP
 
@@ -83,16 +85,24 @@ Choices_ :                           { [] }
          | ChoisesWhite              { $1 }
          | ChoisesArrow              { $1 }
 
-ChoisesWhite : str Expr                            { [ ($1 , $2) ] }
-             | str Expr '|' ChoisesWhite           { ($1 , $2) : $4 }
+ChoisesWhite : constr Expr                            { [ ($1 , $2) ] }
+             | constr Expr '|' ChoisesWhite           { ($1 , $2) : $4 }
 
-ChoisesArrow : str '→' Expr                            { [ ($1 , $3) ] }
-             | str '→' Expr '|' ChoisesArrow           { ($1 , $3) : $5 }
+ChoisesArrow : constr '→' Expr                            { [ ($1 , $3) ] }
+             | constr '→' Expr '|' ChoisesArrow           { ($1 , $3) : $5 }
 
 Decl : Pat ':' Expr '=' Expr         { DeclRegular $1 $3 $5 }
      | rec Pat ':' Expr '=' Expr     { DeclRec $2 $4 $6 }
 
 {
-parseError :: [TokenClass] -> a
-parseError _ = error "Parser Error" 
+
+lexwrap :: (Token -> Alex a) -> Alex a
+lexwrap = (alexMonadScan' >>=)
+
+happyError :: Token -> Alex a
+happyError (Token p t) =
+    alexError' p ("parse error at token '" ++ show t ++ "'")
+
+parseExpr:: FilePath -> String -> Either String Expr
+parseExpr = runAlex' parse
 }
