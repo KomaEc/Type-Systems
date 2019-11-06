@@ -70,10 +70,10 @@ vsnd :: Monad m => Value -> m Value
 vsnd (VProduct _ v2) = return v2
 vsnd (VNeutral n) = return $ VNeutral (NSnd n)
 
-class Evaluatable a where
+class Eval a where
     eval :: (MonadReader Rho m, MonadError Errors m) => a -> m Value
 
-instance Evaluatable Expr where
+instance Eval Expr where
     eval (ExprLam pat exp) = do
         rho <- ask
         return . VLam $ Cl pat exp rho
@@ -116,7 +116,7 @@ instance Evaluatable Expr where
     eval (ExprCaseFun choices) = undefined
     eval (ExprSum choices) = undefined
 
-instance Evaluatable Name where
+instance Eval Name where
     eval x = do
         rho <- ask
         case rho of
