@@ -100,6 +100,8 @@ app (VCaseFun (choices, rho)) (VConstr c v) = -- construct a reader monad Rho ->
     in  do
             val <- runReaderT (eval exp) rho
             app val v
+app (VCaseFun ccls) (VNeutral n) = return . VNeutral $ NFun ccls n
+app (VNeutral n) v = return . VNeutral $ NApp n v
 
 inst = undefined
 
