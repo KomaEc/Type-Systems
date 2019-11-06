@@ -125,17 +125,11 @@ instance Eval Expr where
 
     eval (ExprPrj1 exp)             = do
         val <- eval exp
-        return $ case val of
-                    VProduct v1 _ -> v1
-                    VNeutral n    -> VNeutral $ NFst n
-                    -- impossible to go here!!!!!
+        return $ vfst val
 
     eval (ExprPrj2 exp)             = do
         val <- eval exp
-        return $ case val of 
-                    VProduct _ v2 -> v2
-                    VNeutral n    -> VNeutral $ NSnd n
-                    -- impossible to go here!!!!!
+        return $ vsnd val
 
     eval (ExprSigma pat exp1 exp2)  = do
         val1 <- eval exp1
