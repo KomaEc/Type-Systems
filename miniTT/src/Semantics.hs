@@ -3,12 +3,14 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module Semantics where
 
 import Syntax
 import Control.Monad.Reader
 import Control.Monad.Except
+import Control.Monad.State
 
 -- a value represents an open expression in weak head normal form.
 -- Neutral value : expression whose computation stopped because of an attempt to compute a variable
@@ -16,47 +18,48 @@ import Control.Monad.Except
 
 
 data Value where
-    VNeutral    :: Neutral             -> Value
-    VLam        :: FunCls              -> Value
-    VPi         :: Value -> FunCls     -> Value
-    VSigma      :: Value -> FunCls     -> Value
-    VU          ::                        Value
-    VProduct    :: Value -> Value      -> Value
-    VZero       ::                        Value
-    VUnit       ::                        Value
-    VConstr     :: Name -> Value       -> Value
-    VCaseFun    :: CCls                -> Value
-    VSum        :: CCls                -> Value
+    VNeutral    :: Neutral Value            -> Value
+    VLam        :: FunCls                   -> Value
+    VPi         :: Value -> FunCls          -> Value
+    VSigma      :: Value -> FunCls          -> Value
+    VU          ::                             Value
+    VProduct    :: Value -> Value           -> Value
+    VZero       ::                             Value
+    VUnit       ::                             Value
+    VConstr     :: Name -> Value            -> Value
+    VCaseFun    :: CCls Value               -> Value
+    VSum        :: CCls Value               -> Value
     deriving ( Show
              , Eq )
 
-data Neutral where
-    NeuGeneric :: Int               -> Neutral
-    NeuApp     :: Neutral -> Value  -> Neutral
-    NeuFst     :: Neutral           -> Neutral
-    NeuSnd     :: Neutral           -> Neutral
-    NeuFun     :: CCls -> Neutral   -> Neutral
+data Neutral value where
+    NeuGeneric :: Int                             -> Neutral value
+    NeuApp     :: Neutral value -> value          -> Neutral value
+    NeuFst     :: Neutral value                   -> Neutral value
+    NeuSnd     :: Neutral value                   -> Neutral value
+    NeuFun     :: CCls value -> Neutral value     -> Neutral value
     deriving ( Show
              , Eq )
 
 data FunCls where
-    Cl    :: Pattern -> Expr -> Rho -> FunCls
-    ClCmp :: FunCls -> Name         -> FunCls -- closure composing a constructor
+    Cl    :: Pattern -> Expr -> Rho Value -> FunCls
+    ClCmp :: FunCls -> Name               -> FunCls -- closure composing a constructor
     deriving ( Show
              , Eq )
 
-type CCls = ( Choices , Rho ) -- Choice Closure
+type CCls value = ( Choices , Rho value ) -- Choice Closure
 
-data Rho where -- ρ = [] | ρ , p = V | ρ , p : A = M
-    RNil ::                            Rho
-    RVar :: Rho -> Pattern -> Value -> Rho
-    RDec :: Rho -> Decl             -> Rho
+data Rho value where -- ρ = [] | ρ , p = V | ρ , p : A = M
+    RNil ::                                  Rho value
+    RVar :: Rho value -> Pattern -> value -> Rho value
+    RDec :: Rho value -> Decl             -> Rho value
     deriving ( Show
              , Eq )
 
 -- all the errors that handled in the semantics analysis phase.
 data Errors where
-    VarNotInPattern :: Errors
+    VarNotInPattern   :: Errors -- an auxilary exception
+    UndefinedVariable :: Errors
     deriving Show
 
 -- obtain the value of x from the pattern p that contains x and its value.
@@ -109,9 +112,9 @@ inst :: MonadError Errors m => FunCls -> Value -> m Value
 inst (Cl pat exp rho) v = runReaderT (eval exp) (RVar rho pat v)
 inst (ClCmp fcls c) v = inst fcls (VConstr c v)
 
--- evaluate expression to its value
+-- operational semantics of miniTT
 class Eval a where
-    eval :: (MonadReader Rho m, MonadError Errors m) => a -> m Value
+    eval :: (MonadReader (Rho Value) m, MonadError Errors m) => a -> m Value
 
 instance Eval Expr where
 
@@ -163,9 +166,13 @@ instance Eval Expr where
         val <- eval exp
         return $ VConstr c val
 
-    eval (ExprCaseFun choices)      = undefined
+    eval (ExprCaseFun choices)      = do
+        rho <- ask
+        return $ VCaseFun (choices, rho)
 
-    eval (ExprSum choices)          = undefined
+    eval (ExprSum choices)          = do
+        rho <- ask
+        return $ VSum (choices, rho)
 
 instance Eval Name where
 
@@ -178,14 +185,128 @@ instance Eval Name where
                             VarNotInPattern -> local (const rho') (eval x)
             RDec rho' (DeclRegular pat exp1 exp2) -> do
                     assertVarInPattern pat x
-                    val <- eval exp2
+                    val <- local (const rho') (eval exp2)
                     proj pat val x
                 `catchError`
                     \case
                         VarNotInPattern -> local (const rho') (eval x)
-            RDec rho' (DeclRec pat exp1 exp2)     -> undefined
+            RDec rho' (DeclRec pat exp1 exp2)     -> do
+                    assertVarInPattern pat x
+                    val <- eval exp2 -- use the original ρ, which contains the definition of pat
+                    proj pat val x
+                `catchError`
+                    \case
+                        VarNotInPattern -> local (const rho') (eval x)
+            RNil                                  -> 
+                throwError UndefinedVariable
 
+-- normal expressions
+data NExpr where
+    NLam     :: Int -> NExpr          -> NExpr
+    NPi      :: Int -> NExpr -> NExpr -> NExpr
+    NU       ::                          NExpr
+    NNeutral :: Neutral NExpr         -> NExpr
+    NProduct :: NExpr -> NExpr        -> NExpr
+    NZero    ::                          NExpr
+    NSigma   :: Int -> NExpr -> NExpr -> NExpr
+    NUnit    ::                          NExpr
+    NConstr  :: Name -> NExpr         -> NExpr
+    NCaseFun :: CCls NExpr            -> NExpr
+    NSum     :: CCls NExpr            -> NExpr
+    deriving ( Show
+             , Eq )
 
+type Nat = Int
+
+class ReadBack a b where
+    readBack :: (MonadState Nat m, MonadError Errors m) => a -> m b
+
+instance ReadBack Value NExpr where
+
+    readBack (VLam fcls) = do
+        i <- get
+        put (i + 1)
+        v <- inst fcls (VNeutral $ NeuGeneric i)
+        nexpr <- readBack v
+        return $ NLam i nexpr
+
+    readBack  (VProduct u v) = do
+        n1 <- readBack u
+        n2 <- readBack v
+        return $ NProduct n1 n2
+
+    readBack VZero = return NZero
+
+    readBack (VConstr c v) = do
+        n <- readBack v
+        return $ NConstr c n
+
+    readBack (VCaseFun (choices, rho)) = do
+        rho' <- readBack rho
+        return $ NCaseFun (choices, rho') 
+
+    readBack (VSum (choices, rho)) = do
+        rho' <- readBack rho
+        return $ NSum (choices, rho')
+
+    readBack VU = return NU
+
+    readBack VUnit = return NUnit
+
+    readBack (VPi v fcls) = do
+        i <- get
+        n1 <- readBack v
+        put (i + 1)
+        u <- inst fcls (VNeutral $ NeuGeneric i) -- inst g[xᵢ]
+        n2 <- readBack u
+        return $ NPi i n1 n2
+
+    readBack (VSigma v fcls) = do
+        i <- get
+        n1 <- readBack v
+        put (i + 1)
+        u <- inst fcls (VNeutral $ NeuGeneric i) -- inst g[xᵢ]
+        n2 <- readBack u
+        return $ NSigma i n1 n2
+
+    readBack (VNeutral ne) = do
+        n <- readBack ne
+        return $ NNeutral n
+
+instance ReadBack (Neutral Value) (Neutral NExpr) where
+
+    readBack (NeuGeneric i) = return (NeuGeneric i)
+
+    readBack (NeuApp n v) = do
+        neuval <- readBack n
+        nexpr  <- readBack v
+        return $ NeuApp neuval nexpr
+
+    readBack (NeuFst n) = do
+        neuval <- readBack n
+        return $ NeuFst neuval
+
+    readBack (NeuSnd n) = do
+        neuval <- readBack n
+        return $ NeuSnd neuval    
+
+    readBack (NeuFun (choices, rho) k) = do
+        rho' <- readBack rho
+        k'   <- readBack k
+        return $ NeuFun (choices, rho') k'
+
+instance ReadBack (Rho Value) (Rho NExpr) where
+    
+    readBack (RVar rho pat v) = do
+        rho' <- readBack rho
+        n    <- readBack v
+        return $ RVar rho' pat n
+
+    readBack (RDec rho d) = do
+        rho' <- readBack rho
+        return $ RDec rho' d
+
+    readBack RNil = return RNil
 
 -- the general idea of bidirectional inference : 
 -- 1. Constructor terms should always be typed by innheritance.
