@@ -62,9 +62,13 @@ proj :: MonadError Errors m => Pattern -> Value -> Name -> m Value
 proj (PatName y) val x
     | x == y    = return val
     | otherwise = throwError VarNotInPattern
-proj (PatProduct pat1 pat2) val x =
-    proj pat1 (vfst val) x `catchError` \case 
-        VarNotInPattern -> proj pat2 (vsnd val) x
+proj (PatProduct pat1 pat2) val x = do
+        val1 <- vfst val
+        proj pat1 val1 x 
+    `catchError` \case 
+            VarNotInPattern -> do
+                val2 <- vsnd val
+                proj pat2 val2 x
 proj PatDummy _ _ = throwError VarNotInPattern
 
 assertVarInPattern :: MonadError Errors m => Pattern -> Name -> m ()
@@ -78,17 +82,24 @@ assertVarInPattern PatDummy _ = throwError VarNotInPattern
 
 
 -- v ~> v.1
-vfst :: Value -> Value
-vfst (VProduct v1 _) = v1
-vfst (VNeutral n) = VNeutral (NFst n)
+vfst :: Monad m => Value -> m Value
+vfst (VProduct v1 _) = return v1
+vfst (VNeutral n) = return $ VNeutral (NFst n)
 
 -- v ~> v.2
-vsnd :: Value -> Value
-vsnd (VProduct _ v2) = v2
-vsnd (VNeutral n) = VNeutral (NSnd n)
+vsnd :: Monad m => Value -> m Value
+vsnd (VProduct _ v2) = return v2
+vsnd (VNeutral n) = return $ VNeutral (NSnd n)
 
 -- application between values
-app = undefined
+-- questions : do we need scope check ?
+app :: MonadError Errors m => Value -> Value -> m Value
+app (VLam fcls) v                           = return $ inst fcls v
+app (VCaseFun (choices, rho)) (VConstr c v) = 
+    let exp = fst . head $ filter (\ (x, _) -> x == c) choices
+    in  undefined
+
+inst = undefined
 
 -- evaluate expression to its value
 class Eval a where
@@ -105,7 +116,7 @@ instance Eval Expr where
     eval (ExprApp exp1 exp2)        = do
         val1 <- eval exp1
         val2 <- eval exp2
-        return $ app val1 val2
+        app val1 val2
 
     eval (ExprPi pat exp1 exp2)     = do
         val1 <- eval exp1
@@ -125,11 +136,13 @@ instance Eval Expr where
 
     eval (ExprPrj1 exp)             = do
         val <- eval exp
-        return $ vfst val
+        val' <- vfst val
+        return val'
 
     eval (ExprPrj2 exp)             = do
         val <- eval exp
-        return $ vsnd val
+        val' <- vsnd val
+        return val'
 
     eval (ExprSigma pat exp1 exp2)  = do
         val1 <- eval exp1
@@ -147,6 +160,7 @@ instance Eval Expr where
     eval (ExprSum choices)          = undefined
 
 instance Eval Name where
+
     eval x = do
         rho <- ask
         case rho of
