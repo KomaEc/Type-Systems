@@ -308,7 +308,7 @@ instance ReadBack (Rho Value) (Rho NExpr) where
 
     readBack RNil = return RNil
 
--- the general idea of bidirectional inference : 
--- 1. Constructor terms should always be typed by innheritance.
+-- the general idea of bidirectional inference (maybe?) : 
+-- 1. Constructor terms should always be typed by innheritance. (Weak head normal form)
 -- 2. The constructor subterms in a destructor terms are always considered to be given enough information in the program, and therefore should be typed by synthesis.
 -- 3. For each deconstructor, if the synthesized type information of the constructor subterm is adequate, then the whole term should be synthesized. Otherwise inhereted.
