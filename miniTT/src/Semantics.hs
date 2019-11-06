@@ -95,9 +95,11 @@ vsnd (VNeutral n) = return $ VNeutral (NSnd n)
 -- questions : do we need scope check ?
 app :: MonadError Errors m => Value -> Value -> m Value
 app (VLam fcls) v                           = return $ inst fcls v
-app (VCaseFun (choices, rho)) (VConstr c v) = 
+app (VCaseFun (choices, rho)) (VConstr c v) = -- construct a reader monad Rho -> m a
     let exp = fst . head $ filter (\ (x, _) -> x == c) choices
-    in  undefined
+    in  do
+            val <- runReaderT (eval exp) rho
+            app val v
 
 inst = undefined
 
@@ -164,7 +166,8 @@ instance Eval Name where
     eval x = do
         rho <- ask
         case rho of
-            RVar rho' pat val                     -> proj pat val x
+            RVar rho' pat val                     -> 
+                proj pat val x
                     `catchError` \case
                             VarNotInPattern -> local (const rho') (eval x)
             RDec rho' (DeclRegular pat exp1 exp2) -> do
@@ -174,6 +177,7 @@ instance Eval Name where
                 `catchError`
                     \case
                         VarNotInPattern -> local (const rho') (eval x)
+            RDec rho' (DeclRec pat exp1 exp2)     -> undefined
 
 
 
