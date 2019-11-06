@@ -74,47 +74,62 @@ class Eval a where
     eval :: (MonadReader Rho m, MonadError Errors m) => a -> m Value
 
 instance Eval Expr where
-    eval (ExprLam pat exp) = do
+
+    eval (ExprLam pat exp)          = do
         rho <- ask
         return . VLam $ Cl pat exp rho
-    eval (ExprName x) = eval x
-    eval (ExprApp exp1 exp2) = do
+
+    eval (ExprName x)               = eval x
+
+    eval (ExprApp exp1 exp2)        = do
         val1 <- eval exp1
         val2 <- eval exp2
         return $ app val1 val2
-    eval (ExprPi pat exp1 exp2) = do
+
+    eval (ExprPi pat exp1 exp2)     = do
         val1 <- eval exp1
         rho <- ask
         return $ VPi val1 (Cl pat exp2 rho)
-    eval ExprU = return VU
-    eval (ExprDecl d exp) = local (`RDec` d) (eval exp)
-    eval (ExprProduct exp1 exp2) = do
+
+    eval ExprU                      = return VU
+
+    eval (ExprDecl d exp)           = local (`RDec` d) (eval exp)
+
+    eval (ExprProduct exp1 exp2)    = do
         val1 <- eval exp1
         val2 <- eval exp2
         return $ VProduct val1 val2
-    eval ExprZero = return VZero
-    eval (ExprPrj1 exp) = do
+
+    eval ExprZero                   = return VZero
+
+    eval (ExprPrj1 exp)             = do
         val <- eval exp
         return $ case val of
                     VProduct v1 _ -> v1
                     VNeutral n    -> VNeutral $ NFst n
                     -- impossible to go here!!!!!
-    eval (ExprPrj2 exp) = do
+
+    eval (ExprPrj2 exp)             = do
         val <- eval exp
         return $ case val of 
                     VProduct _ v2 -> v2
                     VNeutral n    -> VNeutral $ NSnd n
                     -- impossible to go here!!!!!
-    eval (ExprSigma pat exp1 exp2) = do
+
+    eval (ExprSigma pat exp1 exp2)  = do
         val1 <- eval exp1
         rho <- ask
         return $ VSigma val1 (Cl pat exp2 rho)
-    eval ExprUnit = return VUnit
-    eval (ExprConstr c exp) = do
+
+    eval ExprUnit                   = return VUnit
+
+    eval (ExprConstr c exp)         = do
         val <- eval exp
         return $ VConstr c val
-    eval (ExprCaseFun choices) = undefined
-    eval (ExprSum choices) = undefined
+
+    eval (ExprCaseFun choices)      = undefined
+
+    eval (ExprSum choices)          = undefined
 
 instance Eval Name where
     eval x = do
