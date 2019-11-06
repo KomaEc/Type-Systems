@@ -151,8 +151,8 @@ instance Eval Name where
         rho <- ask
         case rho of
             RVar rho' pat val                     -> proj pat val x
-                                                        `catchError` \case
-                                                            VarNotInPattern -> local (const rho') (eval x)
+                    `catchError` \case
+                            VarNotInPattern -> local (const rho') (eval x)
             RDec rho' (DeclRegular pat exp1 exp2) -> do
                     assertVarInPattern pat x
                     val <- eval exp2
