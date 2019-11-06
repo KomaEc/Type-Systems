@@ -1,10 +1,14 @@
 {-# LANGUAGE GADTSyntax #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances #-}
 
-module Semantices where
+module Semantics where
 
 import Syntax
 import Control.Monad.Reader
+import Control.Monad.Except
 
 -- a value represents an open expression in weak head normal form.
 -- Neutral value : expression whose computation stopped because of an attempt to compute a variable
@@ -27,24 +31,28 @@ data Value where
              , Eq )
 
 data Neutral where
-    NGeneric :: Int             -> Neutral
-    NApp     :: Neutral -> Val  -> Neutral
-    NFst     :: Neutral         -> Neutral
-    NSnd     :: Neutral         -> Neutral
-    NFun     :: CCls -> Neutral -> Neutral
+    NGeneric :: Int               -> Neutral
+    NApp     :: Neutral -> Value  -> Neutral
+    NFst     :: Neutral           -> Neutral
+    NSnd     :: Neutral           -> Neutral
+    NFun     :: CCls -> Neutral   -> Neutral
     deriving ( Show
              , Eq )
 
 data FunCls where
-    Cl    :: Pattern -> Expr -> Rho -> Funcls
+    Cl    :: Pattern -> Expr -> Rho -> FunCls
     ClCmp :: FunCls -> Name         -> FunCls -- closure composing a constructor
+    deriving ( Show
+             , Eq )
 
 type CCls = ( Choices , Rho ) -- Choice Closure
 
 data Rho where -- ρ = [] | ρ , p = V | ρ , p : A = M
-    RNil ::                          Rho
-    RVar :: Rho -> Pattern -> Val -> Rho
-    RDec :: Rho -> Decl           -> Rho
+    RNil ::                            Rho
+    RVar :: Rho -> Pattern -> Value -> Rho
+    RDec :: Rho -> Decl             -> Rho
+    deriving ( Show
+             , Eq )
 
 data Errors where
     VarNotInPattern :: Errors
@@ -59,17 +67,30 @@ proj (PatProduct pat1 pat2) val x =
         VarNotInPattern -> proj pat2 (vsnd val) x
 proj PatDummy _ _ = throwError VarNotInPattern
 
+assertVarInPattern :: MonadError Errors m => Pattern -> Name -> m ()
+assertVarInPattern (PatName y) x 
+    | x == y    = return ()
+    | otherwise = throwError VarNotInPattern
+assertVarInPattern (PatProduct pat1 pat2) x = 
+    assertVarInPattern pat1 x `catchError` \case
+        VarNotInPattern -> assertVarInPattern pat2 x
+assertVarInPattern PatDummy _ = throwError VarNotInPattern
+
 
 -- v ~> v.1
-vfst :: Monad m => Value -> m Value
-vfst (VProduct v1 _) = return v1
-vfst (VNeutral n) = return $ VNeutral (NFst n)
+vfst :: Value -> Value
+vfst (VProduct v1 _) = v1
+vfst (VNeutral n) = VNeutral (NFst n)
 
 -- v ~> v.2
-vsnd :: Monad m => Value -> m Value
-vsnd (VProduct _ v2) = return v2
-vsnd (VNeutral n) = return $ VNeutral (NSnd n)
+vsnd :: Value -> Value
+vsnd (VProduct _ v2) = v2
+vsnd (VNeutral n) = VNeutral (NSnd n)
 
+-- application between values
+app = undefined
+
+-- evaluate expression to its value
 class Eval a where
     eval :: (MonadReader Rho m, MonadError Errors m) => a -> m Value
 
@@ -137,11 +158,14 @@ instance Eval Name where
         case rho of
             RVar rho' pat val                     -> proj pat val x
                                                         `catchError` \case
-                                                            VarNotInPattern -> local (const rho') eval x
+                                                            VarNotInPattern -> local (const rho') (eval x)
             RDec rho' (DeclRegular pat exp1 exp2) -> do
-                val <- eval exp2 -- ??? shouldn't evaluate it first
-                proj pat val x
-                undefined
+                    assertVarInPattern pat x
+                    val <- eval exp2
+                    proj pat val x
+                `catchError`
+                    \case
+                        VarNotInPattern -> local (const rho') (eval x)
 
 
 
