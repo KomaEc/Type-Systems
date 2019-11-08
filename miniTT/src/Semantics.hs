@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE TupleSections #-}
 
 module Semantics where
@@ -44,10 +45,8 @@ data Neutral value where
     NeuFun     :: CCls value -> Neutral value     -> Neutral value
     deriving ( Show
              , Eq
-             , Functor )
-
-instance Foldable Neutral where
-    foldMap = undefined -- we don't need this
+             , Functor
+             , Foldable )
 
 instance Traversable Neutral where
     sequenceA (NeuGeneric i) = pure $ NeuGeneric i
@@ -80,10 +79,8 @@ data Rho value where -- ρ = [] | ρ , p = V | ρ , p : A = M
     RDec :: Rho value -> Decl             -> Rho value
     deriving ( Show
              , Eq
-             , Functor )
-
-instance Foldable Rho where
-    foldMap = undefined -- we don't need this
+             , Functor
+             , Foldable )
 
 instance Traversable Rho where
     sequenceA RNil = pure RNil
