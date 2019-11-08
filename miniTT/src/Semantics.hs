@@ -1,9 +1,8 @@
 {-# LANGUAGE GADTSyntax #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE TupleSections #-}
@@ -65,14 +64,17 @@ instance Traversable Neutral where
         <$> ((choices, ) <$> sequenceA rhoA)
         <*> sequenceA neuA
 
+-- function closure
 data FunCls where
     Cl    :: Pattern -> Expr -> Rho Value -> FunCls -- should it be Rho value  ?????? 
     ClCmp :: FunCls -> Name               -> FunCls -- closure composing a constructor
     deriving ( Show
              , Eq )
 
-type CCls value = ( Choices , Rho value ) -- Choice Closure
+-- choice (case tree) closure
+type CCls value = ( Choices , Rho value )
 
+-- environment
 data Rho value where -- ρ = [] | ρ , p = V | ρ , p : A = M
     RNil ::                                  Rho value
     RVar :: Rho value -> Pattern -> value -> Rho value
@@ -160,7 +162,6 @@ class Eval a where
     eval :: (MonadReader (Rho Value) m, MonadError Errors m) => a -> m Value
 
 instance Eval Expr where
-
     eval (ExprLam pat exp)          = do
         rho <- ask
         return . VLam $ Cl pat exp rho
@@ -218,7 +219,6 @@ instance Eval Expr where
         return $ VSum (choices, rho)
 
 instance Eval Name where
-
     eval x = do
         rho <- ask
         case rho of
@@ -261,10 +261,12 @@ data NExpr where
 
 type Nat = Int
 
+-- read back functions.
+-- the other two read back functions are (traverse readBack)
 readBack :: (MonadState Nat m, MonadError Errors m) => Value -> m NExpr
 readBack (VLam fcls) = do
     i <- get
-    put (i + 1)
+    modify (+1)
     v <- inst fcls (VNeutral $ NeuGeneric i)
     nexpr <- readBack v
     return $ NLam i nexpr
@@ -281,7 +283,7 @@ readBack (VConstr c v) = do
     return $ NConstr c n
 
 readBack (VCaseFun (choices, rho)) = do
-    rho' <- traverse  readBack rho
+    rho' <- traverse readBack rho
     return $ NCaseFun (choices, rho') 
 
 readBack (VSum (choices, rho)) = do
@@ -295,7 +297,7 @@ readBack VUnit = return NUnit
 readBack (VPi v fcls) = do
     i <- get
     n1 <- readBack v
-    put (i + 1)
+    modify (+1)
     u <- inst fcls (VNeutral $ NeuGeneric i) -- inst g[xᵢ]
     n2 <- readBack u
     return $ NPi i n1 n2
@@ -303,7 +305,7 @@ readBack (VPi v fcls) = do
 readBack (VSigma v fcls) = do
     i <- get
     n1 <- readBack v
-    put (i + 1)
+    modify (+1)
     u <- inst fcls (VNeutral $ NeuGeneric i) -- inst g[xᵢ]
     n2 <- readBack u
     return $ NSigma i n1 n2
@@ -404,6 +406,7 @@ instance ReadBack (Rho Value) (Rho NExpr) where
     readBack RNil = return RNil
 -}
 
+-- typing environment Γ
 type Gamma = [ ( Name, Value ) ]
 
 -- Γ(x) → t
@@ -413,9 +416,9 @@ lookUp ((y, t) : gamma') x
     | x == y    = return t
     | otherwise = lookUp gamma' x
 
--- update a binding p : t = v to Γ
+-- directly update a binding p : t = v to Γ
 insert :: MonadError Errors m => Pattern -> Value -> Value -> Gamma -> m Gamma
-insert (PatName x)        t             v gamma = return $ (x, t) : gamma
+insert (PatName x)        t             _ gamma = return $ (x, t) : gamma
 insert PatDummy           _             _ gamma = return gamma
 insert (PatProduct p1 p2) (VSigma t1 g) v gamma = do
     v1     <- vfst v
@@ -425,7 +428,62 @@ insert (PatProduct p1 p2) (VSigma t1 g) v gamma = do
     insert p2 t2 v2 gamma1
 insert _                  _             _ _     =  throwError InsertGamma
 
+-- monad and related structure for type checking
+data TCState = TCState {
+      dIndex :: Int
+    , venv   :: Rho Value
+    , tenv   :: Gamma
+}   deriving ( Show
+             , Eq )
 
+initTCState :: TCState
+initTCState = TCState 0 RNil []
+
+type TC = ReaderT TCState (
+          Except Errors)
+
+runTC :: TC a -> Either Errors a
+runTC m = runExcept $ runReaderT m initTCState
+
+eval' :: (MonadError Errors m, MonadReader TCState m, Eval a) => a -> m Value
+eval' x = do
+    rho <- asks venv
+    runReaderT (eval x) rho
+
+-- 4 forms of judgement
+
+-- checking a definition is correct, and extends typing environment
+checkD :: (MonadError Errors m, MonadReader TCState m) => Decl -> m Gamma
+
+-- checking an expression is a correct type expression
+checkT :: (MonadError Errors m, MonadReader TCState m) => Expr -> m ()
+
+-- checking an expression is a correct on of a given type
+check :: (MonadError Errors m, MonadReader TCState m) => Expr -> Value -> m ()
+
+-- checking an expressionn is a correct one, and infer its type
+infer :: (MonadError Errors m, MonadReader TCState m) => Expr -> Value -> m Value
+
+-- ρ, Γ ⊢ p : A = M ⟹ Γ₁
+checkD (DeclRegular pat expr1 expr2) = do
+    checkT expr1    -- ρ, Γ ⊢ A
+    t <- eval' expr1 -- t = eval A
+    check expr1 t   -- ρ, Γ ⊢ M ⟸ A
+    v <- eval' expr2 -- v = eval M
+    gamma <- asks tenv
+    insert pat t v gamma
+
+-- ρ, Γ ⊢ rec p : A = M ⟹ Γ₂
+checkD (DeclRec pat expr1 expr2) = do
+    checkT expr1    -- ρ, Γ ⊢ A
+    t <- eval' expr1 -- t = eval A
+    undefined
+
+checkT = undefined
+
+check = undefined
+
+infer = undefined
 
 -- the general idea of bidirectional inference (maybe?) : 
 -- 1. Constructor terms should always be typed by innheritance. (Weak head normal form)
