@@ -6,6 +6,8 @@
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Semantics where
 
@@ -13,6 +15,8 @@ import Syntax
 import Control.Monad.Reader
 import Control.Monad.Except
 import Control.Monad.State
+import Control.Lens
+import Control.Lens.TH
 
 -- a value represents an open expression in weak head normal form.
 -- Neutral value : expression whose computation stopped because of an attempt to compute a variable
@@ -430,11 +434,12 @@ insert _                  _             _ _     =  throwError InsertGamma
 
 -- monad and related structure for type checking
 data TCState = TCState {
-      dIndex :: Int
-    , venv   :: Rho Value
-    , tenv   :: Gamma
+      _dIndex :: Int
+    , _venv   :: Rho Value
+    , _tenv   :: Gamma
 }   deriving ( Show
              , Eq )
+makeLenses ''TCState
 
 initTCState :: TCState
 initTCState = TCState 0 RNil []
@@ -442,27 +447,30 @@ initTCState = TCState 0 RNil []
 type TC = ReaderT TCState (
           Except Errors)
 
+type MonadTC m = (MonadError Errors m, MonadReader TCState m)
+
 runTC :: TC a -> Either Errors a
 runTC m = runExcept $ runReaderT m initTCState
 
 eval' :: (MonadError Errors m, MonadReader TCState m, Eval a) => a -> m Value
 eval' x = do
-    rho <- asks venv
+    rho <- view venv
     runReaderT (eval x) rho
+
 
 -- 4 forms of judgement
 
 -- checking a definition is correct, and extends typing environment
-checkD :: (MonadError Errors m, MonadReader TCState m) => Decl -> m Gamma
+checkD :: MonadTC m => Decl -> m Gamma
 
 -- checking an expression is a correct type expression
-checkT :: (MonadError Errors m, MonadReader TCState m) => Expr -> m ()
+checkT :: MonadTC m => Expr -> m ()
 
 -- checking an expression is a correct on of a given type
-check :: (MonadError Errors m, MonadReader TCState m) => Expr -> Value -> m ()
+check :: MonadTC m => Expr -> Value -> m ()
 
 -- checking an expressionn is a correct one, and infer its type
-infer :: (MonadError Errors m, MonadReader TCState m) => Expr -> Value -> m Value
+infer :: MonadTC m => Expr -> Value -> m Value
 
 -- ρ, Γ ⊢ p : A = M ⟹ Γ₁
 checkD (DeclRegular pat expr1 expr2) = do
@@ -470,16 +478,51 @@ checkD (DeclRegular pat expr1 expr2) = do
     t <- eval' expr1 -- t = eval A
     check expr1 t   -- ρ, Γ ⊢ M ⟸ A
     v <- eval' expr2 -- v = eval M
-    gamma <- asks tenv
+    gamma <- view tenv
     insert pat t v gamma
 
 -- ρ, Γ ⊢ rec p : A = M ⟹ Γ₂
-checkD (DeclRec pat expr1 expr2) = do
+checkD d@(DeclRec pat expr1 expr2) = do
     checkT expr1    -- ρ, Γ ⊢ A
     t <- eval' expr1 -- t = eval A
-    undefined
+    l <- view dIndex
+    gamma <- view tenv
+    let xl = VNeutral $ NeuGeneric l
+    gamma1 <- insert pat t xl gamma -- Γ ⊢ p : t = [x_l] ⟹ Γ₁
+    local ((over venv (\rho -> RVar rho pat xl)) . 
+           (over tenv (const gamma1))) (check expr2 t)
+    -- ((ρ, p = xl), Γ₁ ⊢_(l+1) M ⟸ t
+    -- recursively defined ifentifiers are treated as fresh connstants about which we assume nothing but their typing
+    v <- local (over venv (`RDec` d)) (eval' expr2)
+    insert pat t v gamma
 
-checkT = undefined
+-- ρ, Γ ⊢ U
+checkT ExprU =  return () 
+
+-- ρ, Γ ⊢ Π p : A . B
+checkT (ExprPi pat expr1 expr2) = do
+    checkT expr1 -- ρ, Γ ⊢ A
+    t <- eval' expr1 --  t = eval A
+    l <- view dIndex
+    let xl = VNeutral $ NeuGeneric l
+    gamma1 <- insert pat t xl
+    local ((over venv (\rho -> RVar rho pat xl)) . 
+           (over tenv (const gamma1))) (checkT expr2) 
+    -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B
+
+-- ρ, Γ ⊢ Σ ρ : A . B
+checkT (ExprPi pat expr1 expr2) = do
+    checkT expr1 -- ρ, Γ ⊢ A
+    t <- eval' expr1 --  t = eval A
+    l <- view dIndex
+    let xl = VNeutral $ NeuGeneric l
+    gamma1 <- insert pat t xl
+    local ((over venv (\rho -> RVar rho pat xl)) . 
+           (over tenv (const gamma1))) (checkT expr2) 
+    -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B
+
+-- otherwise, check that A is of type U
+checkT expr = check expr ExprU
 
 check = undefined
 
