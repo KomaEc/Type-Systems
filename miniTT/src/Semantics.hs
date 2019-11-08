@@ -87,10 +87,12 @@ instance Foldable Rho where
 
 instance Traversable Rho where
     sequenceA RNil = pure RNil
+
     sequenceA (RVar rhoA pat vA) = RVar
         <$> sequenceA rhoA
         <*> pure pat
         <*> vA
+
     sequenceA  (RDec rhoA decl) = RDec
         <$> sequenceA rhoA
         <*> pure decl
@@ -262,6 +264,58 @@ data NExpr where
 
 type Nat = Int
 
+readBack :: (MonadState Nat m, MonadError Errors m) => Value -> m NExpr
+readBack (VLam fcls) = do
+    i <- get
+    put (i + 1)
+    v <- inst fcls (VNeutral $ NeuGeneric i)
+    nexpr <- readBack v
+    return $ NLam i nexpr
+
+readBack  (VProduct u v) = do
+    n1 <- readBack u
+    n2 <- readBack v
+    return $ NProduct n1 n2
+
+readBack VZero = return NZero
+
+readBack (VConstr c v) = do
+    n <- readBack v
+    return $ NConstr c n
+
+readBack (VCaseFun (choices, rho)) = do
+    rho' <- traverse  readBack rho
+    return $ NCaseFun (choices, rho') 
+
+readBack (VSum (choices, rho)) = do
+    rho' <- traverse readBack rho
+    return $ NSum (choices, rho')
+
+readBack VU = return NU
+
+readBack VUnit = return NUnit
+
+readBack (VPi v fcls) = do
+    i <- get
+    n1 <- readBack v
+    put (i + 1)
+    u <- inst fcls (VNeutral $ NeuGeneric i) -- inst g[xᵢ]
+    n2 <- readBack u
+    return $ NPi i n1 n2
+
+readBack (VSigma v fcls) = do
+    i <- get
+    n1 <- readBack v
+    put (i + 1)
+    u <- inst fcls (VNeutral $ NeuGeneric i) -- inst g[xᵢ]
+    n2 <- readBack u
+    return $ NSigma i n1 n2
+
+readBack (VNeutral ne) = do
+    n <- traverse readBack ne
+    return $ NNeutral n
+
+{-}
 class ReadBack a b where
     readBack :: (MonadState Nat m, MonadError Errors m) => a -> m b
 
@@ -351,7 +405,7 @@ instance ReadBack (Rho Value) (Rho NExpr) where
         return $ RDec rho' d
 
     readBack RNil = return RNil
-
+-}
 
 type Gamma = [ ( Name, Value ) ]
 
