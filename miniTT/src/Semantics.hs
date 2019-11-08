@@ -4,6 +4,8 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE TupleSections #-}
 
 module Semantics where
 
@@ -32,6 +34,8 @@ data Value where
     deriving ( Show
              , Eq )
 
+-- parameterized neutral terms
+-- value can be Value or NExpr
 data Neutral value where
     NeuGeneric :: Int                             -> Neutral value
     NeuApp     :: Neutral value -> value          -> Neutral value
@@ -39,10 +43,31 @@ data Neutral value where
     NeuSnd     :: Neutral value                   -> Neutral value
     NeuFun     :: CCls value -> Neutral value     -> Neutral value
     deriving ( Show
-             , Eq )
+             , Eq
+             , Functor )
+
+instance Foldable Neutral where
+    foldMap = undefined -- we don't need this
+
+instance Traversable Neutral where
+    sequenceA (NeuGeneric i) = pure $ NeuGeneric i
+    
+    sequenceA (NeuApp neuA vA) = NeuApp
+        <$> sequenceA neuA
+        <*> vA
+
+    sequenceA (NeuFst neuA) = NeuFst
+        <$> sequenceA neuA
+
+    sequenceA (NeuSnd neuA) = NeuSnd
+        <$> sequenceA neuA
+
+    sequenceA (NeuFun (choices, rhoA) neuA) = NeuFun
+        <$> ((choices, ) <$> sequenceA rhoA)
+        <*> sequenceA neuA
 
 data FunCls where
-    Cl    :: Pattern -> Expr -> Rho Value -> FunCls
+    Cl    :: Pattern -> Expr -> Rho Value -> FunCls -- should it be Rho value  ?????? 
     ClCmp :: FunCls -> Name               -> FunCls -- closure composing a constructor
     deriving ( Show
              , Eq )
@@ -54,12 +79,29 @@ data Rho value where -- ρ = [] | ρ , p = V | ρ , p : A = M
     RVar :: Rho value -> Pattern -> value -> Rho value
     RDec :: Rho value -> Decl             -> Rho value
     deriving ( Show
-             , Eq )
+             , Eq
+             , Functor )
+
+instance Foldable Rho where
+    foldMap = undefined -- we don't need this
+
+instance Traversable Rho where
+    sequenceA RNil = pure RNil
+    sequenceA (RVar rhoA pat vA) = RVar
+        <$> sequenceA rhoA
+        <*> pure pat
+        <*> vA
+    sequenceA  (RDec rhoA decl) = RDec
+        <$> sequenceA rhoA
+        <*> pure decl
 
 -- all the errors that handled in the semantics analysis phase.
 data Errors where
     VarNotInPattern   :: Errors -- an auxilary exception
+    ValueNotPair      :: Errors
     UndefinedVariable :: Errors
+    LookupGamma       :: Errors
+    InsertGamma       :: Errors
     deriving Show
 
 -- obtain the value of x from the pattern p that contains x and its value.
@@ -74,7 +116,7 @@ proj (PatProduct pat1 pat2) val x = do
             VarNotInPattern -> do
                 val2 <- vsnd val
                 proj pat2 val2 x
-proj PatDummy _ _ = throwError VarNotInPattern
+proj PatDummy _ _                 = throwError VarNotInPattern
 
 assertVarInPattern :: MonadError Errors m => Pattern -> Name -> m ()
 assertVarInPattern (PatName y) x 
@@ -83,18 +125,20 @@ assertVarInPattern (PatName y) x
 assertVarInPattern (PatProduct pat1 pat2) x = 
     assertVarInPattern pat1 x `catchError` \case
         VarNotInPattern -> assertVarInPattern pat2 x
-assertVarInPattern PatDummy _ = throwError VarNotInPattern
+assertVarInPattern PatDummy _               = throwError VarNotInPattern
 
 
 -- v ~> v.1
-vfst :: Monad m => Value -> m Value
+vfst :: MonadError Errors m => Value -> m Value
 vfst (VProduct v1 _) = return v1
-vfst (VNeutral n) = return $ VNeutral (NeuFst n)
+vfst (VNeutral n)    = return $ VNeutral (NeuFst n)
+vfst _               = throwError ValueNotPair
 
 -- v ~> v.2
-vsnd :: Monad m => Value -> m Value
+vsnd :: MonadError Errors m => Value -> m Value
 vsnd (VProduct _ v2) = return v2
-vsnd (VNeutral n) = return $ VNeutral (NeuSnd n)
+vsnd (VNeutral n)    = return $ VNeutral (NeuSnd n)
+vsnd _               = throwError ValueNotPair
 
 -- application between values
 app :: MonadError Errors m => Value -> Value -> m Value
@@ -104,13 +148,13 @@ app (VCaseFun (choices, rho)) (VConstr c v) = -- construct a reader monad Rho ->
     in  do
             val <- runReaderT (eval exp) rho
             app val v
-app (VCaseFun ccls) (VNeutral n) = return . VNeutral $ NeuFun ccls n
-app (VNeutral n) v = return . VNeutral $ NeuApp n v
+app (VCaseFun ccls) (VNeutral n)            = return . VNeutral $ NeuFun ccls n
+app (VNeutral n) v                          = return . VNeutral $ NeuApp n v
 
 -- instantiates a function closure to a value
 inst :: MonadError Errors m => FunCls -> Value -> m Value
 inst (Cl pat exp rho) v = runReaderT (eval exp) (RVar rho pat v)
-inst (ClCmp fcls c) v = inst fcls (VConstr c v)
+inst (ClCmp fcls c) v   = inst fcls (VConstr c v)
 
 -- operational semantics of miniTT
 class Eval a where
@@ -307,6 +351,30 @@ instance ReadBack (Rho Value) (Rho NExpr) where
         return $ RDec rho' d
 
     readBack RNil = return RNil
+
+
+type Gamma = [ ( Name, Value ) ]
+
+-- Γ(x) → t
+lookUp :: MonadError Errors m => Gamma -> Name -> m Value
+lookUp []                _  = throwError LookupGamma
+lookUp ((y, t) : gamma') x
+    | x == y    = return t
+    | otherwise = lookUp gamma' x
+
+-- update a binding p : t = v to Γ
+insert :: MonadError Errors m => Pattern -> Value -> Value -> Gamma -> m Gamma
+insert (PatName x)        t             v gamma = return $ (x, t) : gamma
+insert PatDummy           _             _ gamma = return gamma
+insert (PatProduct p1 p2) (VSigma t1 g) v gamma = do
+    v1     <- vfst v
+    gamma1 <- insert p1 t1 v1 gamma
+    t2     <- inst g v1
+    v2     <- vsnd v
+    insert p2 t2 v2 gamma1
+insert _                  _             _ _     =  throwError InsertGamma
+
+
 
 -- the general idea of bidirectional inference (maybe?) : 
 -- 1. Constructor terms should always be typed by innheritance. (Weak head normal form)
