@@ -17,6 +17,7 @@ import Control.Monad.Except
 import Control.Monad.State
 import Control.Lens
 import Control.Lens.TH
+import Data.Function ((&))
 
 -- a value represents an open expression in weak head normal form.
 -- Neutral value : expression whose computation stopped because of an attempt to compute a variable
@@ -107,6 +108,8 @@ data Errors where
     UndefinedVariable :: Errors
     LookupGamma       :: Errors
     InsertGamma       :: Errors
+    WrongConstructor  :: Errors
+    TypeMismatch      :: Errors
     deriving Show
 
 -- obtain the value of x from the pattern p that contains x and its value.
@@ -318,6 +321,9 @@ readBack (VNeutral ne) = do
     n <- traverse readBack ne
     return $ NNeutral n
 
+readBack' :: MonadError Errors m => Value -> m NExpr
+readBack' v = evalStateT (readBack v) 0
+
 {-}
 class ReadBack a b where
     readBack :: (MonadState Nat m, MonadError Errors m) => a -> m b
@@ -414,23 +420,23 @@ instance ReadBack (Rho Value) (Rho NExpr) where
 type Gamma = [ ( Name, Value ) ]
 
 -- Γ(x) → t
-lookUp :: MonadError Errors m => Gamma -> Name -> m Value
-lookUp []                _  = throwError LookupGamma
-lookUp ((y, t) : gamma') x
+lookupG' :: MonadError Errors m => Gamma -> Name -> m Value
+lookupG' []                _  = throwError LookupGamma
+lookupG' ((y, t) : gamma') x
     | x == y    = return t
-    | otherwise = lookUp gamma' x
+    | otherwise = lookupG' gamma' x
 
 -- directly update a binding p : t = v to Γ
-insert :: MonadError Errors m => Pattern -> Value -> Value -> Gamma -> m Gamma
-insert (PatName x)        t             _ gamma = return $ (x, t) : gamma
-insert PatDummy           _             _ gamma = return gamma
-insert (PatProduct p1 p2) (VSigma t1 g) v gamma = do
+insertG' :: MonadError Errors m => Pattern -> Value -> Value -> Gamma -> m Gamma
+insertG' (PatName x)        t             _ gamma = return $ (x, t) : gamma
+insertG' PatDummy           _             _ gamma = return gamma
+insertG' (PatProduct p1 p2) (VSigma t1 g) v gamma = do
     v1     <- vfst v
-    gamma1 <- insert p1 t1 v1 gamma
+    gamma1 <- insertG' p1 t1 v1 gamma
     t2     <- inst g v1
     v2     <- vsnd v
-    insert p2 t2 v2 gamma1
-insert _                  _             _ _     =  throwError InsertGamma
+    insertG' p2 t2 v2 gamma1
+insertG' _                  _             _ _     =  throwError InsertGamma
 
 -- monad and related structure for type checking
 data TCState = TCState {
@@ -457,6 +463,36 @@ eval' x = do
     rho <- view venv
     runReaderT (eval x) rho
 
+insertG :: MonadTC m => Pattern -> Value -> Value -> m Gamma
+insertG pat t v = do
+    gamma <- view tenv
+    insertG' pat t v gamma
+
+lookupG :: MonadTC m => Name -> m Value
+lookupG x = do
+    gamma <- view tenv
+    lookupG' gamma x
+
+newGenericVar :: MonadTC m => m Value
+newGenericVar = do
+    l <- view dIndex
+    return $ VNeutral (NeuGeneric l)
+
+-- lookup a name in a choice
+lookupC :: MonadTC m => Name -> Choices -> m Expr
+lookupC x c = do
+    case lookup x c of
+        Just expr -> return expr
+        Nothing   -> throwError WrongConstructor
+
+--  check that constructors are matched
+checkConstrMatch :: MonadTC m => Choices -> Choices -> m ()
+checkConstrMatch ((c, _) : choices) ((c', _) : choices') 
+    | c == c'   = checkConstrMatch choices choices'
+    | otherwise = throwError WrongConstructor
+checkConstrMatch []                 [] = return ()
+checkConstrMatch _                  _  = throwError WrongConstructor
+
 
 -- 4 forms of judgement
 
@@ -470,7 +506,7 @@ checkT :: MonadTC m => Expr -> m ()
 check :: MonadTC m => Expr -> Value -> m ()
 
 -- checking an expressionn is a correct one, and infer its type
-infer :: MonadTC m => Expr -> Value -> m Value
+infer :: MonadTC m => Expr -> m Value
 
 -- ρ, Γ ⊢ p : A = M ⟹ Γ₁
 checkD (DeclRegular pat expr1 expr2) = do
@@ -479,22 +515,21 @@ checkD (DeclRegular pat expr1 expr2) = do
     check expr1 t   -- ρ, Γ ⊢ M ⟸ A
     v <- eval' expr2 -- v = eval M
     gamma <- view tenv
-    insert pat t v gamma
+    insertG pat t v
 
 -- ρ, Γ ⊢ rec p : A = M ⟹ Γ₂
 checkD d@(DeclRec pat expr1 expr2) = do
     checkT expr1    -- ρ, Γ ⊢ A
     t <- eval' expr1 -- t = eval A
-    l <- view dIndex
-    gamma <- view tenv
-    let xl = VNeutral $ NeuGeneric l
-    gamma1 <- insert pat t xl gamma -- Γ ⊢ p : t = [x_l] ⟹ Γ₁
+    xl <- newGenericVar
+    gamma1 <- insertG pat t xl -- Γ ⊢ p : t = [x_l] ⟹ Γ₁
     local ((over venv (\rho -> RVar rho pat xl)) . 
-           (over tenv (const gamma1))) (check expr2 t)
+           (over tenv (const gamma1)) .
+           (over dIndex (+1))) (check expr2 t)
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1) M ⟸ t
     -- recursively defined ifentifiers are treated as fresh connstants about which we assume nothing but their typing
     v <- local (over venv (`RDec` d)) (eval' expr2)
-    insert pat t v gamma
+    insertG pat t v
 
 -- ρ, Γ ⊢ U
 checkT ExprU =  return () 
@@ -503,30 +538,136 @@ checkT ExprU =  return ()
 checkT (ExprPi pat expr1 expr2) = do
     checkT expr1 -- ρ, Γ ⊢ A
     t <- eval' expr1 --  t = eval A
-    l <- view dIndex
-    let xl = VNeutral $ NeuGeneric l
-    gamma1 <- insert pat t xl
+    xl <- newGenericVar
+    gamma1 <- insertG pat t xl
     local ((over venv (\rho -> RVar rho pat xl)) . 
-           (over tenv (const gamma1))) (checkT expr2) 
+           (over tenv (const gamma1)) .
+           (over dIndex (+1))) (checkT expr2) 
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B
 
 -- ρ, Γ ⊢ Σ ρ : A . B
-checkT (ExprPi pat expr1 expr2) = do
+checkT (ExprSigma pat expr1 expr2) = do
     checkT expr1 -- ρ, Γ ⊢ A
     t <- eval' expr1 --  t = eval A
-    l <- view dIndex
-    let xl = VNeutral $ NeuGeneric l
-    gamma1 <- insert pat t xl
+    xl <- newGenericVar
+    gamma1 <- insertG pat t xl
     local ((over venv (\rho -> RVar rho pat xl)) . 
-           (over tenv (const gamma1))) (checkT expr2) 
+           (over tenv (const gamma1)) .
+           (over dIndex (+1))) (checkT expr2) 
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B
 
 -- otherwise, check that A is of type U
-checkT expr = check expr ExprU
+checkT expr = check expr VU
 
-check = undefined
+-- ρ, Γ ⊢ λ p. M ⟸ Π t g
+check (ExprLam pat m) (VPi t g) = do
+    xl <- newGenericVar
+    gamma1 <- insertG pat t xl -- Γ ⊢ p : t = [xl] ⟹ Γ₁
+    g' <- inst g xl -- g' = inst g [xl]
+    local ((over venv (\rho -> RVar rho pat xl)) . 
+           (over tenv (const gamma1)) .
+           (over dIndex (+1))) $ check m g'
+    -- (ρ \, p = [xl]), Γ₁ ⊢ M ⟸ inst g [xl]
 
-infer = undefined
+-- ρ, Γ ⊢ (M, N) ⟸ Σ t g
+check (ExprProduct m n) (VSigma t g) = do
+    check m t  -- ρ, Γ ⊢ M ⟸ t
+    mv <- eval' m
+    g' <- inst g mv
+    check n g' -- ρ, Γ ⊢ N ⟸ inst g (eval M)
+
+-- ρ, Γ ⊢ cᵢ M ⟸ Sum <..., ν>
+check (ExprConstr c m) (VSum (choices, nu)) = do
+    a <- lookupC c choices
+    av <- local (over venv (const nu)) (eval' a)
+    check m av -- ρ, Γ ⊢ M ⟸ eval Aᵢ
+
+-- ρ, Γ ⊢ fun (...) ⟸ Π (Sum <..., ν>) g
+check (ExprCaseFun choices) (VPi (VSum (choices', nu)) g) = do
+    checkConstrMatch choices choices'
+    zipWithM_ (\(c, m) (_, a) -> do
+        a' <- local (over venv (const nu)) (eval' a)
+        check m (VPi a' (ClCmp g c))) choices choices'
+    -- ρ, Γ ⊢ Mᵢ ⟸ Π (eval Aᵢ) (g ∘ cᵢ)
+    
+-- ρ, Γ ⊢ D; M ⟸ t
+check (ExprDecl decl m) t = do
+    gamma1 <- checkD decl -- ρ, Γ ⊢ D ⟹ Γ₁
+    local (over venv (`RDec` decl)) $ check m t
+    -- (ρ, D), Γ₁ ⊢ M ⟸ t
+
+-- ρ, Γ ⊢ 0 ⟸ 1
+check ExprZero VUnit = return ()
+
+-- ρ, Γ ⊢ 1 ⟸ U
+check ExprUnit VU = return ()
+
+-- ρ, Γ ⊢ Π p : A . B ⟸ U
+check (ExprPi pat a b) VU = do
+    check a VU -- ρ, Γ ⊢ A ⟸ U
+    t <- eval' a --  t = eval A
+    xl <- newGenericVar
+    gamma1 <- insertG pat t xl
+    local ((over venv (\rho -> RVar rho pat xl)) . 
+           (over tenv (const gamma1)) .
+           (over dIndex (+1))) (check b VU) 
+    -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B ⟸ U
+
+-- ρ, Γ ⊢ Σ p : A . B ⟸ U
+check (ExprSigma pat a b) VU = do
+    check a VU -- ρ, Γ ⊢ A ⟸ U
+    t <- eval' a --  t = eval A
+    xl <- newGenericVar
+    gamma1 <- insertG pat t xl
+    local ((over venv (\rho -> RVar rho pat xl)) . 
+           (over tenv (const gamma1)) .
+           (over dIndex (+1))) (check b VU) 
+    -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B ⟸ U
+
+-- ρ, Γ ⊢ Sum (...) ⟸ U
+check (ExprSum choices) VU = 
+    forM_ choices 
+        (\(_, a) -> check a VU)
+
+-- otherwise we must infer its type
+check m t = do
+    t' <- infer m
+    n <- readBack' t
+    n' <- readBack' t'
+    if n == n' 
+        then return ()
+        else throwError TypeMismatch 
+
+-- ρ, Γ ⊢ x ⟹ t
+infer (ExprName x) = lookupG x 
+
+-- ρ, Γ ⊢ M N  ⟹ inst g (eval N)
+infer (ExprApp m n) = do
+    mt <- infer m
+    case mt of
+        VPi t g -> do
+            check n t
+            v <- eval' n
+            inst g v
+        _       -> throwError TypeMismatch
+
+-- ρ, Γ ⊢ M.1 ⟹ t
+infer (ExprPrj1 m) = do
+    t' <- infer m
+    case t' of
+        VSigma t _ -> return t
+        _          -> throwError TypeMismatch
+
+-- ρ, Γ ⊢ M.2 ⟹ inst g ((eval M).1)
+infer (ExprPrj2 m) = do
+    t <- infer m
+    case t of
+        VSigma _ g -> do
+            v <- eval' m
+            v' <- vfst v
+            inst g v'
+        _          -> throwError TypeMismatch
+
 
 -- the general idea of bidirectional inference (maybe?) : 
 -- 1. Constructor terms should always be typed by innheritance. (Weak head normal form)
