@@ -440,7 +440,7 @@ insertG' _                  _             _ _     =  throwError InsertGamma
 
 -- monad and related structure for type checking
 data TCState = TCState {
-      _dIndex :: Int
+      _freeCnt :: Int
     , _venv   :: Rho Value
     , _tenv   :: Gamma
 }   deriving ( Show
@@ -473,14 +473,14 @@ lookupG x = do
     gamma <- view tenv
     lookupG' gamma x
 
-newGenericVar :: MonadTC m => m Value
-newGenericVar = do
-    l <- view dIndex
+newGenericVal :: MonadTC m => m Value
+newGenericVal = do
+    l <- view freeCnt
     return $ VNeutral (NeuGeneric l)
 
 -- lookup a name in a choice
 lookupC :: MonadTC m => Name -> Choices -> m Expr
-lookupC x c = do
+lookupC x c = 
     case lookup x c of
         Just expr -> return expr
         Nothing   -> throwError WrongConstructor
@@ -521,11 +521,11 @@ checkD (DeclRegular pat expr1 expr2) = do
 checkD d@(DeclRec pat expr1 expr2) = do
     checkT expr1    -- ρ, Γ ⊢ A
     t <- eval' expr1 -- t = eval A
-    xl <- newGenericVar
+    xl <- newGenericVal
     gamma1 <- insertG pat t xl -- Γ ⊢ p : t = [x_l] ⟹ Γ₁
     local ((over venv (\rho -> RVar rho pat xl)) . 
            (over tenv (const gamma1)) .
-           (over dIndex (+1))) (check expr2 t)
+           (over freeCnt (+1))) (check expr2 t)
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1) M ⟸ t
     -- recursively defined ifentifiers are treated as fresh connstants about which we assume nothing but their typing
     v <- local (over venv (`RDec` d)) (eval' expr2)
@@ -538,22 +538,22 @@ checkT ExprU =  return ()
 checkT (ExprPi pat expr1 expr2) = do
     checkT expr1 -- ρ, Γ ⊢ A
     t <- eval' expr1 --  t = eval A
-    xl <- newGenericVar
+    xl <- newGenericVal
     gamma1 <- insertG pat t xl
     local ((over venv (\rho -> RVar rho pat xl)) . 
            (over tenv (const gamma1)) .
-           (over dIndex (+1))) (checkT expr2) 
+           (over freeCnt (+1))) (checkT expr2) 
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B
 
 -- ρ, Γ ⊢ Σ ρ : A . B
 checkT (ExprSigma pat expr1 expr2) = do
     checkT expr1 -- ρ, Γ ⊢ A
     t <- eval' expr1 --  t = eval A
-    xl <- newGenericVar
+    xl <- newGenericVal
     gamma1 <- insertG pat t xl
     local ((over venv (\rho -> RVar rho pat xl)) . 
            (over tenv (const gamma1)) .
-           (over dIndex (+1))) (checkT expr2) 
+           (over freeCnt (+1))) (checkT expr2) 
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B
 
 -- otherwise, check that A is of type U
@@ -561,12 +561,12 @@ checkT expr = check expr VU
 
 -- ρ, Γ ⊢ λ p. M ⟸ Π t g
 check (ExprLam pat m) (VPi t g) = do
-    xl <- newGenericVar
+    xl <- newGenericVal
     gamma1 <- insertG pat t xl -- Γ ⊢ p : t = [xl] ⟹ Γ₁
     g' <- inst g xl -- g' = inst g [xl]
     local ((over venv (\rho -> RVar rho pat xl)) . 
            (over tenv (const gamma1)) .
-           (over dIndex (+1))) $ check m g'
+           (over freeCnt (+1))) $ check m g'
     -- (ρ \, p = [xl]), Γ₁ ⊢ M ⟸ inst g [xl]
 
 -- ρ, Γ ⊢ (M, N) ⟸ Σ t g
@@ -606,22 +606,22 @@ check ExprUnit VU = return ()
 check (ExprPi pat a b) VU = do
     check a VU -- ρ, Γ ⊢ A ⟸ U
     t <- eval' a --  t = eval A
-    xl <- newGenericVar
+    xl <- newGenericVal
     gamma1 <- insertG pat t xl
     local ((over venv (\rho -> RVar rho pat xl)) . 
            (over tenv (const gamma1)) .
-           (over dIndex (+1))) (check b VU) 
+           (over freeCnt (+1))) (check b VU) 
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B ⟸ U
 
 -- ρ, Γ ⊢ Σ p : A . B ⟸ U
 check (ExprSigma pat a b) VU = do
     check a VU -- ρ, Γ ⊢ A ⟸ U
     t <- eval' a --  t = eval A
-    xl <- newGenericVar
+    xl <- newGenericVal
     gamma1 <- insertG pat t xl
     local ((over venv (\rho -> RVar rho pat xl)) . 
            (over tenv (const gamma1)) .
-           (over dIndex (+1))) (check b VU) 
+           (over freeCnt (+1))) (check b VU) 
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B ⟸ U
 
 -- ρ, Γ ⊢ Sum (...) ⟸ U

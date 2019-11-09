@@ -1,6 +1,6 @@
 # miniTT
 
-This repo contains my implementation of miniTT.
+This repo contains my implementation of miniTT with parser.
 
 ## Syntax
 There're minor changes to the original syntax (mainly for parsing purpose) :
