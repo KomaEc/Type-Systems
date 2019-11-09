@@ -39,12 +39,13 @@ import Control.Monad.Except
     'U'                         { Token _ TokenU }
 
 %nonassoc DOT_GUARD
-%nonassoc str lambda rec constr 'Π' 'Σ' fun sum zero one 'U' '('
 %left '|'
 %left '.'
 %right '→'
+%nonassoc str lambda rec constr 'Π' 'Σ' fun sum zero one 'U'
 %nonassoc '='
 %left ',' '×'
+%nonassoc '('
 %left APP
 
 %%

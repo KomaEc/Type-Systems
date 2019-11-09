@@ -5,16 +5,23 @@ module ParserTest where
 import Syntax
 import Lexer
 import Parser
+import Control.Monad
+    
+decl1 :: String
+decl1 = "id : Π a : U . a → a = λ a . λ x . x;"
+    
+decl2 :: String
+decl2 = "bool : U = Sum (True 1 | False 1);"
 
-prog1 :: String
-prog1 = "id : Π A : U . A → A = λ A . λ x . x"
+decl3 :: String
+decl3 = "elimBool : Π c : bool → U . c (False 0) → c (True 0) → Π b : bool . c b\n = λ c . λ h0 . λ h1 . fun (True → h1 | False → h0);"
 
-prog2 :: String
-prog2 = "bool : U = Sum (True 1 | False 1)\n elimBool : Π c : bool → U . c (False 0) → c (True 0) → Π b : bool . C b\n = λ c . λ h0 . λ h1 . fun (True → h0 | False → h1)"
+decls :: [String]
+decls = [decl1, decl2, decl3]
 
 testParser :: IO ()
-testParser = do
-    let exp1 = parseExpr prog1
-        exp2 = parseExpr prog2
-    print $ show exp1
-    print $ show exp2
+testParser = 
+    forM_ decls $ \decl -> do
+        putStrLn "parse result: "
+        either print print $ parseExpr "<test>" decl
+    

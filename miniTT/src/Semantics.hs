@@ -106,11 +106,17 @@ data Errors where
     VarNotInPattern   :: Errors -- an auxilary exception
     ValueNotPair      :: Errors
     UndefinedVariable :: Errors
-    LookupGamma       :: Errors
+    LookupGamma       :: Name -> Errors
     InsertGamma       :: Errors
     WrongConstructor  :: Errors
     TypeMismatch      :: Errors
+    NonInferable      :: Expr -> Errors
+    Debug             :: String -> Errors
+    InferNeqCheck     :: Expr -> NExpr -> NExpr -> Errors
     deriving Show
+
+debug :: MonadError Errors m => m a
+debug = throwError $ Debug "I went here"
 
 -- obtain the value of x from the pattern p that contains x and its value.
 proj :: MonadError Errors m => Pattern -> Value -> Name -> m Value
@@ -198,13 +204,11 @@ instance Eval Expr where
 
     eval (ExprPrj1 exp)             = do
         val <- eval exp
-        val' <- vfst val
-        return val'
+        vfst val
 
     eval (ExprPrj2 exp)             = do
         val <- eval exp
-        val' <- vsnd val
-        return val'
+        vsnd val
 
     eval (ExprSigma pat exp1 exp2)  = do
         val1 <- eval exp1
@@ -213,9 +217,13 @@ instance Eval Expr where
 
     eval ExprUnit                   = return VUnit
 
-    eval (ExprConstr c exp)         = do
+    eval (ExprConstr c exp)         = VConstr c
+        <$> eval exp
+        {-
+            do
         val <- eval exp
         return $ VConstr c val
+        -}
 
     eval (ExprCaseFun choices)      = do
         rho <- ask
@@ -285,9 +293,13 @@ readBack  (VProduct u v) = do
 
 readBack VZero = return NZero
 
-readBack (VConstr c v) = do
+readBack (VConstr c v) = NConstr c
+    <$> readBack v
+    {-
+        do
     n <- readBack v
     return $ NConstr c n
+    -}
 
 readBack (VCaseFun (choices, rho)) = do
     rho' <- traverse readBack rho
@@ -317,9 +329,13 @@ readBack (VSigma v fcls) = do
     n2 <- readBack u
     return $ NSigma i n1 n2
 
-readBack (VNeutral ne) = do
+readBack (VNeutral ne) = NNeutral 
+    <$> traverse readBack ne
+    {-
+        do
     n <- traverse readBack ne
     return $ NNeutral n
+    -}
 
 readBack' :: MonadError Errors m => Value -> m NExpr
 readBack' v = evalStateT (readBack v) 0
@@ -421,7 +437,7 @@ type Gamma = [ ( Name, Value ) ]
 
 -- Γ(x) → t
 lookupG' :: MonadError Errors m => Gamma -> Name -> m Value
-lookupG' []                _  = throwError LookupGamma
+lookupG' []                x  = throwError $ LookupGamma x
 lookupG' ((y, t) : gamma') x
     | x == y    = return t
     | otherwise = lookupG' gamma' x
@@ -474,9 +490,13 @@ lookupG x = do
     lookupG' gamma x
 
 newGenericVal :: MonadTC m => m Value
-newGenericVal = do
+newGenericVal = VNeutral . NeuGeneric
+    <$> view freeCnt
+    {-
+        do
     l <- view freeCnt
     return $ VNeutral (NeuGeneric l)
+    -}
 
 -- lookup a name in a choice
 lookupC :: MonadTC m => Name -> Choices -> m Expr
@@ -512,7 +532,7 @@ infer :: MonadTC m => Expr -> m Value
 checkD (DeclRegular pat expr1 expr2) = do
     checkT expr1    -- ρ, Γ ⊢ A
     t <- eval' expr1 -- t = eval A
-    check expr1 t   -- ρ, Γ ⊢ M ⟸ A
+    check expr2 t   -- ρ, Γ ⊢ M ⟸ A
     v <- eval' expr2 -- v = eval M
     gamma <- view tenv
     insertG pat t v
@@ -523,9 +543,9 @@ checkD d@(DeclRec pat expr1 expr2) = do
     t <- eval' expr1 -- t = eval A
     xl <- newGenericVal
     gamma1 <- insertG pat t xl -- Γ ⊢ p : t = [x_l] ⟹ Γ₁
-    local ((over venv (\rho -> RVar rho pat xl)) . 
-           (over tenv (const gamma1)) .
-           (over freeCnt (+1))) (check expr2 t)
+    local (over venv (\rho -> RVar rho pat xl) . 
+           over tenv (const gamma1) .
+           over freeCnt (+1)) (check expr2 t)
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1) M ⟸ t
     -- recursively defined ifentifiers are treated as fresh connstants about which we assume nothing but their typing
     v <- local (over venv (`RDec` d)) (eval' expr2)
@@ -540,9 +560,9 @@ checkT (ExprPi pat expr1 expr2) = do
     t <- eval' expr1 --  t = eval A
     xl <- newGenericVal
     gamma1 <- insertG pat t xl
-    local ((over venv (\rho -> RVar rho pat xl)) . 
-           (over tenv (const gamma1)) .
-           (over freeCnt (+1))) (checkT expr2) 
+    local (over venv (\rho -> RVar rho pat xl) . 
+           over tenv (const gamma1) .
+           over freeCnt (+1)) (checkT expr2) 
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B
 
 -- ρ, Γ ⊢ Σ ρ : A . B
@@ -551,9 +571,9 @@ checkT (ExprSigma pat expr1 expr2) = do
     t <- eval' expr1 --  t = eval A
     xl <- newGenericVal
     gamma1 <- insertG pat t xl
-    local ((over venv (\rho -> RVar rho pat xl)) . 
-           (over tenv (const gamma1)) .
-           (over freeCnt (+1))) (checkT expr2) 
+    local (over venv (\rho -> RVar rho pat xl) . 
+           over tenv (const gamma1) .
+           over freeCnt (+1)) (checkT expr2) 
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B
 
 -- otherwise, check that A is of type U
@@ -564,9 +584,9 @@ check (ExprLam pat m) (VPi t g) = do
     xl <- newGenericVal
     gamma1 <- insertG pat t xl -- Γ ⊢ p : t = [xl] ⟹ Γ₁
     g' <- inst g xl -- g' = inst g [xl]
-    local ((over venv (\rho -> RVar rho pat xl)) . 
-           (over tenv (const gamma1)) .
-           (over freeCnt (+1))) $ check m g'
+    local (over venv (\rho -> RVar rho pat xl) . 
+           over tenv (const gamma1) .
+           over freeCnt (+1)) $ check m g'
     -- (ρ \, p = [xl]), Γ₁ ⊢ M ⟸ inst g [xl]
 
 -- ρ, Γ ⊢ (M, N) ⟸ Σ t g
@@ -593,7 +613,8 @@ check (ExprCaseFun choices) (VPi (VSum (choices', nu)) g) = do
 -- ρ, Γ ⊢ D; M ⟸ t
 check (ExprDecl decl m) t = do
     gamma1 <- checkD decl -- ρ, Γ ⊢ D ⟹ Γ₁
-    local (over venv (`RDec` decl)) $ check m t
+    local (over venv (`RDec` decl) . 
+           over tenv (const gamma1)) $ check m t
     -- (ρ, D), Γ₁ ⊢ M ⟸ t
 
 -- ρ, Γ ⊢ 0 ⟸ 1
@@ -608,9 +629,9 @@ check (ExprPi pat a b) VU = do
     t <- eval' a --  t = eval A
     xl <- newGenericVal
     gamma1 <- insertG pat t xl
-    local ((over venv (\rho -> RVar rho pat xl)) . 
-           (over tenv (const gamma1)) .
-           (over freeCnt (+1))) (check b VU) 
+    local (over venv (\rho -> RVar rho pat xl) . 
+           over tenv (const gamma1) .
+           over freeCnt (+1)) (check b VU) 
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B ⟸ U
 
 -- ρ, Γ ⊢ Σ p : A . B ⟸ U
@@ -619,9 +640,9 @@ check (ExprSigma pat a b) VU = do
     t <- eval' a --  t = eval A
     xl <- newGenericVal
     gamma1 <- insertG pat t xl
-    local ((over venv (\rho -> RVar rho pat xl)) . 
-           (over tenv (const gamma1)) .
-           (over freeCnt (+1))) (check b VU) 
+    local (over venv (\rho -> RVar rho pat xl) . 
+           over tenv (const gamma1) .
+           over freeCnt (+1)) (check b VU) 
     -- ((ρ, p = xl), Γ₁ ⊢_(l+1)  B ⟸ U
 
 -- ρ, Γ ⊢ Sum (...) ⟸ U
@@ -636,7 +657,7 @@ check m t = do
     n' <- readBack' t'
     if n == n' 
         then return ()
-        else throwError TypeMismatch 
+        else throwError $ InferNeqCheck m n n'
 
 -- ρ, Γ ⊢ x ⟹ t
 infer (ExprName x) = lookupG x 
@@ -667,6 +688,8 @@ infer (ExprPrj2 m) = do
             v' <- vfst v
             inst g v'
         _          -> throwError TypeMismatch
+
+infer expr = throwError $ NonInferable expr
 
 
 -- the general idea of bidirectional inference (maybe?) : 

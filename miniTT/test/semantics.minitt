@@ -1,0 +1,19 @@
+id : Π a : U . a → a
+   = λ a . λ x . x
+;
+
+bool : U 
+     = Sum (True 1 | False 1)
+;
+
+true : bool
+     = True 0
+;
+
+false : bool
+      = False 0
+;
+
+elimBool : Π c : (bool → U) . c (False 0) → c (True 0) → Π b : bool . c b
+         = λ c . λ h0 . λ h1 . fun (True → λ _ . h1 | False → λ _ . h0)
+;
