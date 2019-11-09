@@ -1,6 +1,14 @@
 # miniTT
 
-## Parser
-Ambiguities and how to resolve in Happy:
+This repo contains my implementation of miniTT.
 
-* `Π p : exp1 . 1 . exp2`. The first dot should be reduced rather than shifted. The allowed expression should be `Π p : (exp1 . 1) . exp2`. To resolve, add context Nonterminal `ColonExprDot` to indicate the case mentioned above.s
+## Syntax
+There're minor changes to the original syntax (mainly for parsing purpose) :
+
+* expression variable should start with lower case, while constructor should start with upper case.
+
+* `->` and `→` are allowed syntax for arrow type.
+
+* `*` and `×` are allowed syntax for product type.
+
+* a complete program consists of a series of declaration (without an expression at the end).
