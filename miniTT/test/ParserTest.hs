@@ -14,7 +14,7 @@ decl2 :: String
 decl2 = "bool : U = Sum (True 1 | False 1);"
 
 decl3 :: String
-decl3 = "elimBool : Π c : bool → U . c (False 0) → c (True 0) → Π b : bool . c b\n = λ c . λ h0 . λ h1 . fun (True → h1 | False → h0);"
+decl3 = "elimBool : Π c : bool → U . c (False 0) → c (True 0) → Π b : bool . c b\n = λ c . λ h0 . λ h1 . fun (True _ → h1 | False _ → h0);"
 
 decls :: [String]
 decls = [decl1, decl2, decl3]

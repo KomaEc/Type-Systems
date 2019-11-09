@@ -89,8 +89,8 @@ Choices_ :                           { [] }
 ChoisesWhite : constr Expr                            { [ ($1 , $2) ] }
              | constr Expr '|' ChoisesWhite           { ($1 , $2) : $4 }
 
-ChoisesArrow : constr '→' Expr                            { [ ($1 , $3) ] }
-             | constr '→' Expr '|' ChoisesArrow           { ($1 , $3) : $5 }
+ChoisesArrow : constr Pat '→' Expr                            { [ ($1 , ExprLam $2 $4) ] }
+             | constr Pat '→' Expr '|' ChoisesArrow           { ($1 , ExprLam $2 $4) : $6 }
 
 Decl : Pat ':' Expr '=' Expr         { DeclRegular $1 $3 $5 }
      | rec Pat ':' Expr '=' Expr     { DeclRec $2 $4 $6 }

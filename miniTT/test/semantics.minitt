@@ -16,7 +16,7 @@ false : bool
 
 -- failed one
 elimBool : Π c : (bool → U) . c false → c true → Π b : bool . c b
-         = λ c . λ h0 . λ h1 . fun (True → λ _ . h1 | False → λ _ . h0)
+         = λ c . λ h0 . λ h1 . fun (True _ → h1 | False _ → h0)
 ; 
 -- the system cannot determine that unit type has only one inhibitance zero, it's weird
 -- when type-checking `λ _ . h1`, the type-checker checks it against `Π x₃ : 1 . x₀ (True x₃)`, but with inferred type of `h₁ : x₀ (True 0)` 
