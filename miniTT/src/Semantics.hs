@@ -337,9 +337,6 @@ readBack (VNeutral ne) = NNeutral
     return $ NNeutral n
     -}
 
-readBack' :: MonadError Errors m => Value -> m NExpr
-readBack' v = evalStateT (readBack v) 0
-
 {-}
 class ReadBack a b where
     readBack :: (MonadState Nat m, MonadError Errors m) => a -> m b
@@ -479,6 +476,11 @@ eval' x = do
     rho <- view venv
     runReaderT (eval x) rho
 
+readBack' :: (MonadError Errors m, MonadReader TCState m) => Value -> m NExpr
+readBack' v = do
+    l <- view freeCnt
+    evalStateT (readBack v) l
+
 insertG :: MonadTC m => Pattern -> Value -> Value -> m Gamma
 insertG pat t v = do
     gamma <- view tenv
@@ -534,7 +536,6 @@ checkD (DeclRegular pat expr1 expr2) = do
     t <- eval' expr1 -- t = eval A
     check expr2 t   -- ρ, Γ ⊢ M ⟸ A
     v <- eval' expr2 -- v = eval M
-    gamma <- view tenv
     insertG pat t v
 
 -- ρ, Γ ⊢ rec p : A = M ⟹ Γ₂
