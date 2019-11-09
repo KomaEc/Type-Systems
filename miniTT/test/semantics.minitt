@@ -14,6 +14,7 @@ false : bool
       = False 0
 ;
 
+-- failed one
 elimBool : Π c : (bool → U) . c false → c true → Π b : bool . c b
          = λ c . λ h0 . λ h1 . fun (True → λ _ . h1 | False → λ _ . h0)
 ; 
