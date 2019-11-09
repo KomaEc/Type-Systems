@@ -7,11 +7,15 @@ I find that there's a rules forgotten in the paper : the elimination rule for un
 
 Let's expand it a little more:
 ```
-elimBool : Π c : (bool → U) . c false → c true → Π b : bool . c b
+bool : U 
+     = Sum (True 1 | False 1)
+;
+
+elimBool : Π c : (bool → U) . c (False 0) → c (True 0) → Π b : bool . c b
          = λ c . λ h0 . λ h1 . fun (True → λ _ . h1 | False → λ _ . h0)
 ; 
 ```
-The type checker will check the term `λ _ . h1` against the type `Π b : bool . x₀ b`, and then (by following the rules) check the term `h1` against the type `x₀ (True x₃)`, where `x₃` the the generic value produced when checking a lambda-term. It's clear to us that `x₃` has type unit, but type checker can't witness this.
+The type checker will check the term `λ _ . h1` against the type `Π b : bool . x₀ b`, and then (by following the rules) check the term `h1` against the type `x₀ (True x₃)`, where `x₃` is the generic value produced when checking a lambda-term. It's clear to us that `x₃` has type unit, and therefore must be `0` (by elimination rule), but type checker can't witness this.
 
 ## Syntax
 There're minor changes to the original syntax (mainly for parsing purpose) :
