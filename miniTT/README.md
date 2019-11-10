@@ -22,7 +22,7 @@ The type checker will check the term `λ _ . h1` against the type `Π x₃ : 1. 
 To resolve this, the language is added a premitive construct `rec₁` (the recursor for unit type), with the following rules:
 * (formation) `⊢ 1 : U`
 * (construction) `⊢ 0 : 1`
-* (elimination) `⊢ M ⟸ A` implies `⊢ rec₁ M ⟸ 1 → A`
+* (elimination) `⊢ M ⟸ inst f 0` implies `⊢ rec₁ M ⟸ Π 1 f`
 * (computation) `(rec₁ M) 0 ≡ M`
 
 And in the case tree, choice of the form `c → M` is parsed into `rec₁ M` (and hence the 2nd retriction in syntax as listed below).
