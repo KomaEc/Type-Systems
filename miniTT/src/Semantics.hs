@@ -21,7 +21,7 @@ import Data.Function ((&))
 
 -- a value represents an open expression in weak head normal form.
 -- Neutral value : expression whose computation stopped because of an attempt to compute a variable
--- Conoical value : the form off which makes clear the head counstruction of an exapression
+-- Conoical value : the form of which makes clear the head counstruction of an exapression
 
 
 data Value where
@@ -36,6 +36,8 @@ data Value where
     VConstr     :: Name -> Value            -> Value
     VCaseFun    :: CCls Value               -> Value
     VSum        :: CCls Value               -> Value
+    VRecUnit    :: Value                    -> Value 
+    -- rec₁ shouldn't be put into neutral value. The consumption of unit type occurs in application
     deriving ( Show
              , Eq )
 
@@ -164,6 +166,7 @@ app (VCaseFun (choices, rho)) (VConstr c v) = -- construct a reader monad Rho ->
             app val v
 app (VCaseFun ccls) (VNeutral n)            = return . VNeutral $ NeuFun ccls n
 app (VNeutral n) v                          = return . VNeutral $ NeuApp n v
+app (VRecUnit v) VUnit                      = return v  -- defining equation for rec₁
 
 -- instantiates a function closure to a value
 inst :: MonadError Errors m => FunCls -> Value -> m Value
@@ -219,11 +222,6 @@ instance Eval Expr where
 
     eval (ExprConstr c exp)         = VConstr c
         <$> eval exp
-        {-
-            do
-        val <- eval exp
-        return $ VConstr c val
-        -}
 
     eval (ExprCaseFun choices)      = do
         rho <- ask
@@ -232,6 +230,9 @@ instance Eval Expr where
     eval (ExprSum choices)          = do
         rho <- ask
         return $ VSum (choices, rho)
+
+    eval (ExprRecUnit m)            = VRecUnit
+        <$> eval m
 
 instance Eval Name where
     eval x = do
@@ -271,14 +272,13 @@ data NExpr where
     NConstr  :: Name -> NExpr         -> NExpr
     NCaseFun :: CCls NExpr            -> NExpr
     NSum     :: CCls NExpr            -> NExpr
+    NRecUnit :: NExpr                 -> NExpr
     deriving ( Show
              , Eq )
 
-type Nat = Int
-
 -- read back functions.
 -- the other two read back functions are (traverse readBack)
-readBack :: (MonadState Nat m, MonadError Errors m) => Value -> m NExpr
+readBack :: (MonadState Int m, MonadError Errors m) => Value -> m NExpr
 readBack (VLam fcls) = do
     i <- get
     modify (+1)
@@ -331,6 +331,9 @@ readBack (VSigma v fcls) = do
 
 readBack (VNeutral ne) = NNeutral 
     <$> traverse readBack ne
+
+readBack (VRecUnit v) = NRecUnit
+    <$> readBack v
     {-
         do
     n <- traverse readBack ne
@@ -454,8 +457,8 @@ insertG' _                  _             _ _     =  throwError InsertGamma
 -- monad and related structure for type checking
 data TCState = TCState {
       _freeCnt :: Int
-    , _venv   :: Rho Value
-    , _tenv   :: Gamma
+    , _venv    :: Rho Value
+    , _tenv    :: Gamma
 }   deriving ( Show
              , Eq )
 makeLenses ''TCState
@@ -650,6 +653,11 @@ check (ExprSigma pat a b) VU = do
 check (ExprSum choices) VU = 
     forM_ choices 
         (\(_, a) -> check a VU)
+
+-- ρ, Γ ⊢ rec₁ M ⟸ 1 → A
+check (ExprRecUnit m) (VPi VUnit f) = do
+    a <- inst f VZero -- TODO : inst 0 ???
+    check m a -- ρ, Γ ⊢ M ⟸ A
 
 -- otherwise we must infer its type
 check m t = do

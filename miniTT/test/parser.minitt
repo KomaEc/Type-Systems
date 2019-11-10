@@ -18,5 +18,5 @@ test : U
 -- to resolve, set precedence of '.' to be lower than '→'
 
 elimBool : Π c : (bool → U) . c (False 0) → c (True 0) → Π b : bool . c b 
-         = λ c . λ h0 . λ h1 . fun (False _ → h0 | True _ → h1)
+         = λ c . λ h0 . λ h1 . fun (False → h0 | True → h1)
 ;

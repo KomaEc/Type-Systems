@@ -11,7 +11,7 @@ bool : U
      = Sum (True 1 | False 1)
 ;
 
-elimBool : Π c : (bool → U) . c false → c true → Π b : bool . c b
+elimBool : ∀ c : bool → U . c false → c true → ∀ b : bool . c b
          = λ c . λ h0 . λ h1 . fun (True _ → h1 | False _ → h0)
 ; 
 ```
@@ -21,6 +21,8 @@ The type checker will check the term `λ _ . h1` against the type `Π b : bool .
 There're minor changes to the original syntax (mainly for parsing purpose) :
 
 * expression variable should start with lower case, while constructor should start with upper case.
+
+* `∀` and `Π` are allowed syntax for Pi type.
 
 * `->` and `→` are allowed syntax for arrow type.
 

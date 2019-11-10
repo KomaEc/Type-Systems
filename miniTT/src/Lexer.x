@@ -23,6 +23,8 @@ $alphaU = [A-Z]
 tokens :-
     $white+                             ;
     "--".*                              ;
+    "rec₁"                              { lex' TokenRecUnit }
+    "rec1"                              { lex' TokenRecUnit }
     "lambda"                            { lex' TokenLam }
     "rec"                               { lex' TokenRec }
     "λ"                                 { lex' TokenLam }
@@ -40,6 +42,7 @@ tokens :-
     \:                                  { lex' TokenColon }
     \;                                  { lex' TokenSemiColon }
     \_                                  { lex' TokenDummy }
+    "∀"                                 { lex' TokenPi }
     "Π"                                 { lex' TokenPi }
     "Σ"                                 { lex' TokenSigma }
     \,                                  { lex' TokenComma }
@@ -97,6 +100,7 @@ data Token = Token AlexPosn TokenClass
 
 data TokenClass 
     = TokenLam
+    | TokenRecUnit              -- "rec₁"
     | TokenRec
     | TokenArrow                -- "→"
     | TokenVar String

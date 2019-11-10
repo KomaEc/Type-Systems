@@ -15,6 +15,7 @@ import Control.Monad.Except
 
 %token
     lambda                      { Token _ TokenLam }
+    recUnit                     { Token _ TokenRecUnit }
     rec                         { Token _ TokenRec }
     '→'                         { Token _ TokenArrow }
     str                         { Token _ (TokenVar $$) }
@@ -42,7 +43,7 @@ import Control.Monad.Except
 %left '|'
 %left '.'
 %right '→'
-%nonassoc str lambda rec constr 'Π' 'Σ' fun sum zero one 'U'
+%nonassoc str lambda rec recUnit constr 'Π' 'Σ' fun sum zero one 'U'
 %nonassoc '='
 %left ',' '×'
 %nonassoc '('
@@ -56,6 +57,7 @@ Prog :                                              { ExprZero }
 Expr : lambda Pat '.' Expr                          { ExprLam $2 $4 }
      | str                                          { ExprName $1 }
      | Expr Expr %prec APP                          { ExprApp $1 $2 }
+     | constr                                       { ExprConstr $1 ExprZero }
      | constr Expr %prec APP                        { ExprConstr $1 $2 }
      | 'Π' Pat ColonExprDot Expr %prec DOT_GUARD    { ExprPi $2 $3 $4 }
      | 'Σ' Pat ColonExprDot Expr %prec DOT_GUARD    { ExprSigma $2 $3 $4 }
@@ -70,6 +72,7 @@ Expr : lambda Pat '.' Expr                          { ExprLam $2 $4 }
      | Expr '→' Expr                                { ExprPi PatDummy $1 $3 }
      | Expr '×' Expr                                { ExprSigma PatDummy $1 $3 }
      | '(' Expr ')'                                 { $2 }
+     | recUnit Expr                                 { ExprRecUnit $2 }
 
 ColonExprDot : ':' Expr '.'                         { $2 }
 
@@ -87,10 +90,14 @@ Choices_ :                           { [] }
          | ChoisesArrow              { $1 }
 
 ChoisesWhite : constr Expr                            { [ ($1 , $2) ] }
+             | constr                                 { [ ($1 , ExprUnit) ] }
              | constr Expr '|' ChoisesWhite           { ($1 , $2) : $4 }
+             | constr '|' ChoisesWhite                { ($1 , ExprUnit) : $3 }
 
 ChoisesArrow : constr Pat '→' Expr                            { [ ($1 , ExprLam $2 $4) ] }
+             | constr '→' Expr                                { [ ($1 , ExprRecUnit $3) ] }
              | constr Pat '→' Expr '|' ChoisesArrow           { ($1 , ExprLam $2 $4) : $6 }
+             | constr '→' Expr '|' ChoisesArrow               { ($1 , ExprRecUnit $3) : $5 }
 
 Decl : Pat ':' Expr '=' Expr         { DeclRegular $1 $3 $5 }
      | rec Pat ':' Expr '=' Expr     { DeclRec $2 $4 $6 }

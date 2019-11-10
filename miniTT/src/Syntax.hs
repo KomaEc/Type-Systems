@@ -27,6 +27,7 @@ data Expr where
     ExprCaseFun     :: Choices ->                 Expr
     ExprSum         :: Choices ->                 Expr
     ExprDecl        :: Decl -> Expr ->            Expr
+    ExprRecUnit     :: Expr                    -> Expr  -- rec₁ M
     deriving ( Eq
              , Show )
 
