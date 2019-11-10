@@ -20,10 +20,10 @@ elimBool : ∀ c : bool → U . c false → c true → ∀ b : bool . c b
 The type checker will check the term `λ _ . h1` against the type `Π b : bool . x₀ b`, and then (by following the rules) check the term `h1` against the type `x₀ (True x₃)`, where `x₃` is the generic value produced when checking a lambda-term. However, according to typing context, the inferred type for `h1` is `x₀ (True 0)`. It's clear to us that `x₃` has type unit, and therefore must be `0` (by elimination rule), but type checker can't witness this.
 
 To resolve this, the language is added a premitive construct `rec₁` (the recursor for unit type), with the following rules:
-* (formation) ⊢ 1 : U
-* (construction) ⊢ 0 : 1
-* (elimination) ⊢ M ⟸ A implies ⊢ rec₁ M ⟸ 1 → A
-* (computation) (rec₁ M) 0 ≡ M
+* (formation) `⊢ 1 : U`
+* (construction) `⊢ 0 : 1`
+* (elimination) `⊢ M ⟸ A` implies `⊢ rec₁ M ⟸ 1 → A`
+* (computation) `(rec₁ M) 0 ≡ M`
 
 And in the case tree, choice of the form `c → M` is parsed into `rec₁ M` (and hence the 2nd retriction in syntax as listed below).
 
