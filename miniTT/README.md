@@ -2,6 +2,12 @@
 
 This repo contains my implementation of miniTT with parser.
 
+## Usage
+```
+stack build
+stack exec miniTT-exe [FILE]
+```
+
 ## Semantics
 
 ### Unit Elimination
