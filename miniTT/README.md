@@ -3,7 +3,9 @@
 This repo contains my implementation of miniTT with parser.
 
 ## Semantics
-I find that there's a rules forgotten in the paper : the elimination rule for unit type. If anyone ever wrote a type checker that follows the rule presented in the paper faithfully, he/she would find that the 4th example, namely `boolElim` cannot pass type-checking. It will complain that an inferred type is not equal to a checked type.
+
+### Unit Elimination
+I find that there's a rule forgotten in the paper : the elimination rule for unit type. If anyone ever wrote a type checker that follows the rule presented in the paper faithfully, he/she would find that the 4th example, namely `boolElim` cannot pass type-checking. It will complain that an inferred type is not equal to a checked type.
 
 Let's expand it a little more:
 ```
@@ -17,12 +19,22 @@ elimBool : ∀ c : bool → U . c false → c true → ∀ b : bool . c b
 ```
 The type checker will check the term `λ _ . h1` against the type `Π b : bool . x₀ b`, and then (by following the rules) check the term `h1` against the type `x₀ (True x₃)`, where `x₃` is the generic value produced when checking a lambda-term. However, according to typing context, the inferred type for `h1` is `x₀ (True 0)`. It's clear to us that `x₃` has type unit, and therefore must be `0` (by elimination rule), but type checker can't witness this.
 
+To resolve this, the language is added a premitive construct `rec₁` (the recursor for unit type), with the following rules:
+* (formation) ⊢ 1 : U
+* (construction) ⊢ 0 : 1
+* (elimination) ⊢ M ⟸ A implies ⊢ rec₁ M ⟸ 1 → A
+* (computation) (rec₁ M) 0 ≡ M
+
 ## Syntax
 There're minor changes to the original syntax (mainly for parsing purpose) :
 
 * expression variable should start with lower case, while constructor should start with upper case.
 
-* `∀` and `Π` are allowed syntax for Pi type.
+* for a labelled sum, if a label `c` is associated with unit type, the case analysis function for it should always be in sugared form, i.e. fun (c → ...). Otherwise the program may not pass type-check.
+
+* `Pi`, `∀` and `Π` are allowed syntax for Pi type.
+
+* `Sigma` and `Σ` are allowed syntax for Sigma type.
 
 * `->` and `→` are allowed syntax for arrow type.
 

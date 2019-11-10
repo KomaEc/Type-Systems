@@ -31,6 +31,11 @@ tokens :-
     "U"                                 { lex' TokenU }
     "fun"                               { lex' TokenFun }
     "Sum"                               { lex' TokenSum }
+    "Pi"                                { lex' TokenPi }
+    "∀"                                 { lex' TokenPi }
+    "Π"                                 { lex' TokenPi }
+    "Sigma"                             { lex' TokenSigma }
+    "Σ"                                 { lex' TokenSigma }
     $alphaL [$alpha $digit \_ \']*      { lex TokenVar }
     $alphaU [$alpha $digit \_ \']*      { lex TokenConstr }
     \=                                  { lex' TokenEq }
@@ -42,9 +47,6 @@ tokens :-
     \:                                  { lex' TokenColon }
     \;                                  { lex' TokenSemiColon }
     \_                                  { lex' TokenDummy }
-    "∀"                                 { lex' TokenPi }
-    "Π"                                 { lex' TokenPi }
-    "Σ"                                 { lex' TokenSigma }
     \,                                  { lex' TokenComma }
     \|                                  { lex' TokenVBar }
     "0"                                 { lex' TokenZero }
