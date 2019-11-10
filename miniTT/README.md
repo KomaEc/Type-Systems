@@ -5,7 +5,7 @@ This repo contains my implementation of miniTT with parser.
 ## Semantics
 
 ### Unit Elimination
-I find that there's a rule forgotten in the paper : the elimination rule for unit type. If anyone ever wrote a type checker that follows the rule presented in the paper faithfully, he/she would find that the 4th example, namely `boolElim` cannot pass type-checking. It will complain that an inferred type is not equal to a checked type.
+I find that there's a rule forgotten in the paper : the elimination rule for unit type. I wrote a type checker that follows the rule presented in the paper faithfully, and I found that the 4th example, namely `boolElim` cannot pass type-checking. It will complain that an inferred type is not equal to a checked type.
 
 Let's expand it a little more:
 ```
@@ -24,6 +24,8 @@ To resolve this, the language is added a premitive construct `rec₁` (the recur
 * (construction) ⊢ 0 : 1
 * (elimination) ⊢ M ⟸ A implies ⊢ rec₁ M ⟸ 1 → A
 * (computation) (rec₁ M) 0 ≡ M
+
+And in the case tree, choice of the form `c → M` is parsed into `rec₁ M` (and hence the 2nd retriction in syntax as listed below).
 
 ## Syntax
 There're minor changes to the original syntax (mainly for parsing purpose) :
