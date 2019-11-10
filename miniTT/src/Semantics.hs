@@ -105,20 +105,21 @@ instance Traversable Rho where
 
 -- all the errors that handled in the semantics analysis phase.
 data Errors where
-    VarNotInPattern   :: Errors -- an auxilary exception
-    ValueNotPair      :: Errors
-    UndefinedVariable :: Errors
-    LookupGamma       :: Name -> Errors
-    InsertGamma       :: Errors
-    WrongConstructor  :: Errors
-    TypeMismatch      :: Errors
-    NonInferable      :: Expr -> Errors
-    Debug             :: String -> Errors
-    InferNeqCheck     :: Expr -> NExpr -> NExpr -> Errors
+    VarNotInPattern   ::                            Errors -- an auxilary exception
+    ValueNotPair      ::                            Errors
+    UndefinedVariable ::                            Errors
+    LookupGamma       :: Name                    -> Errors
+    InsertGamma       ::                            Errors
+    WrongConstructor  ::                            Errors
+    TypeMismatch      ::                            Errors
+    NonInferable      :: Expr                    -> Errors
+    InferNeqCheck     :: Expr -> NExpr -> NExpr  -> Errors
+    -- for debugging purposes
+    Debug             :: String                  -> Errors
+    DebugV            :: Value                   -> Errors
+    DebugI            :: Int                     -> Errors
+    DebugF            :: FunCls                  -> Errors
     deriving Show
-
-debug :: MonadError Errors m => m a
-debug = throwError $ Debug "I went here"
 
 -- obtain the value of x from the pattern p that contains x and its value.
 proj :: MonadError Errors m => Pattern -> Value -> Name -> m Value
@@ -295,11 +296,6 @@ readBack VZero = return NZero
 
 readBack (VConstr c v) = NConstr c
     <$> readBack v
-    {-
-        do
-    n <- readBack v
-    return $ NConstr c n
-    -}
 
 readBack (VCaseFun (choices, rho)) = do
     rho' <- traverse readBack rho
@@ -334,103 +330,6 @@ readBack (VNeutral ne) = NNeutral
 
 readBack (VRecUnit v) = NRecUnit
     <$> readBack v
-    {-
-        do
-    n <- traverse readBack ne
-    return $ NNeutral n
-    -}
-
-{-}
-class ReadBack a b where
-    readBack :: (MonadState Nat m, MonadError Errors m) => a -> m b
-
-instance ReadBack Value NExpr where
-
-    readBack (VLam fcls) = do
-        i <- get
-        put (i + 1)
-        v <- inst fcls (VNeutral $ NeuGeneric i)
-        nexpr <- readBack v
-        return $ NLam i nexpr
-
-    readBack  (VProduct u v) = do
-        n1 <- readBack u
-        n2 <- readBack v
-        return $ NProduct n1 n2
-
-    readBack VZero = return NZero
-
-    readBack (VConstr c v) = do
-        n <- readBack v
-        return $ NConstr c n
-
-    readBack (VCaseFun (choices, rho)) = do
-        rho' <- readBack rho
-        return $ NCaseFun (choices, rho') 
-
-    readBack (VSum (choices, rho)) = do
-        rho' <- readBack rho
-        return $ NSum (choices, rho')
-
-    readBack VU = return NU
-
-    readBack VUnit = return NUnit
-
-    readBack (VPi v fcls) = do
-        i <- get
-        n1 <- readBack v
-        put (i + 1)
-        u <- inst fcls (VNeutral $ NeuGeneric i) -- inst g[xᵢ]
-        n2 <- readBack u
-        return $ NPi i n1 n2
-
-    readBack (VSigma v fcls) = do
-        i <- get
-        n1 <- readBack v
-        put (i + 1)
-        u <- inst fcls (VNeutral $ NeuGeneric i) -- inst g[xᵢ]
-        n2 <- readBack u
-        return $ NSigma i n1 n2
-
-    readBack (VNeutral ne) = do
-        n <- readBack ne
-        return $ NNeutral n
-
-instance ReadBack (Neutral Value) (Neutral NExpr) where
-
-    readBack (NeuGeneric i) = return (NeuGeneric i)
-
-    readBack (NeuApp n v) = do
-        neuval <- readBack n
-        nexpr  <- readBack v
-        return $ NeuApp neuval nexpr
-
-    readBack (NeuFst n) = do
-        neuval <- readBack n
-        return $ NeuFst neuval
-
-    readBack (NeuSnd n) = do
-        neuval <- readBack n
-        return $ NeuSnd neuval    
-
-    readBack (NeuFun (choices, rho) k) = do
-        rho' <- readBack rho
-        k'   <- readBack k
-        return $ NeuFun (choices, rho') k'
-
-instance ReadBack (Rho Value) (Rho NExpr) where
-    
-    readBack (RVar rho pat v) = do
-        rho' <- readBack rho
-        n    <- readBack v
-        return $ RVar rho' pat n
-
-    readBack (RDec rho d) = do
-        rho' <- readBack rho
-        return $ RDec rho' d
-
-    readBack RNil = return RNil
--}
 
 -- typing environment Γ
 type Gamma = [ ( Name, Value ) ]
@@ -497,11 +396,6 @@ lookupG x = do
 newGenericVal :: MonadTC m => m Value
 newGenericVal = VNeutral . NeuGeneric
     <$> view freeCnt
-    {-
-        do
-    l <- view freeCnt
-    return $ VNeutral (NeuGeneric l)
-    -}
 
 -- lookup a name in a choice
 lookupC :: MonadTC m => Name -> Choices -> m Expr

@@ -40,6 +40,7 @@ import Control.Monad.Except
     'U'                         { Token _ TokenU }
 
 %nonassoc DOT_GUARD
+%nonassoc SINGLE_CONSTR
 %left '|'
 %left '.'
 %right '→'
@@ -57,7 +58,7 @@ Prog :                                              { ExprZero }
 Expr : lambda Pat '.' Expr                          { ExprLam $2 $4 }
      | str                                          { ExprName $1 }
      | Expr Expr %prec APP                          { ExprApp $1 $2 }
-     | constr                                       { ExprConstr $1 ExprZero }
+     | constr  %prec SINGLE_CONSTR                  { ExprConstr $1 ExprZero }
      | constr Expr %prec APP                        { ExprConstr $1 $2 }
      | 'Π' Pat ColonExprDot Expr %prec DOT_GUARD    { ExprPi $2 $3 $4 }
      | 'Σ' Pat ColonExprDot Expr %prec DOT_GUARD    { ExprSigma $2 $3 $4 }
