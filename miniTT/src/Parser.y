@@ -38,6 +38,10 @@ import Control.Monad.Except
     two                         { Token _ TokenTwo }
     '×'                         { Token _ TokenTimes }
     'U'                         { Token _ TokenU }
+    'I'                         { Token _ TokenI }
+    'J'                         { Token _ TokenJ }
+    '&'                         { Token _ TokenMetaAnd }
+    refl                        { Token _ TokenRefl }
 
 %nonassoc DOT_GUARD
 %nonassoc SINGLE_CONSTR
@@ -56,6 +60,9 @@ Prog :                                              { ExprZero }
      | Decl ';' Prog                                { ExprDecl $1 $3 }                             
 
 Expr : lambda Pat '.' Expr                          { ExprLam $2 $4 }
+     | 'I' '(' Expr '&' Expr '&' Expr ')'           { ExprI $3 $5 $7 }
+     | 'J' '(' Expr '&' Expr '&' Expr '&' Expr '&' Expr '&' Expr ')'   { ExprJ $3 $5 $7 $9 $11 $13 }
+     | refl                                         { ExprRefl }
      | str                                          { ExprName $1 }
      | Expr Expr %prec APP                          { ExprApp $1 $2 }
      | constr  %prec SINGLE_CONSTR                  { ExprConstr $1 ExprZero }

@@ -38,6 +38,9 @@ data Value where
     VSum        :: CCls Value               -> Value
     VRecUnit    :: Value                    -> Value 
     -- rec₁ shouldn't be put into neutral value. The consumption of unit type occurs in application
+
+    VRefl       ::                             Value
+    VI          :: Value -> Value -> Value  -> Value
     deriving ( Show
              , Eq )
 
@@ -49,6 +52,8 @@ data Neutral value where
     NeuFst     :: Neutral value                   -> Neutral value
     NeuSnd     :: Neutral value                   -> Neutral value
     NeuFun     :: CCls value -> Neutral value     -> Neutral value
+    
+    NeuJ       :: value -> value -> value -> value -> value -> Neutral value -> Neutral value
     deriving ( Show
              , Eq
              , Functor
@@ -107,20 +112,26 @@ instance Traversable Rho where
 data Errors where
     VarNotInPattern   ::                            Errors -- an auxilary exception
     ValueNotPair      ::                            Errors
-    UndefinedVariable ::                            Errors
+    UndefinedVariable :: Name                    -> Errors
     LookupGamma       :: Name                    -> Errors
     InsertGamma       ::                            Errors
     WrongConstructor  ::                            Errors
     TypeMismatch      ::                            Errors
     NonInferable      :: Expr                    -> Errors
     InferNeqCheck     :: Expr -> NExpr -> NExpr  -> Errors
+
+    ReflNeq           :: NExpr -> NExpr          -> Errors
+    NotIdInJ          ::                            Errors
+    Unimplemented     ::                            Errors
     -- for debugging purposes
     Debug             :: String                  -> Errors
     DebugV            :: Value                   -> Errors
     DebugI            :: Int                     -> Errors
     DebugF            :: FunCls                  -> Errors
+    DebugN            :: NExpr                   -> Errors
+    DebugApp          :: Value -> Value          -> Errors
     deriving Show
-
+    
 -- obtain the value of x from the pattern p that contains x and its value.
 proj :: MonadError Errors m => Pattern -> Value -> Name -> m Value
 proj (PatName y) val x
@@ -161,13 +172,15 @@ vsnd _               = throwError ValueNotPair
 app :: MonadError Errors m => Value -> Value -> m Value
 app (VLam fcls) v                           = inst fcls v
 app (VCaseFun (choices, rho)) (VConstr c v) = -- construct a reader monad Rho -> m a
-    let exp = fst . head $ filter (\ (x, _) -> x == c) choices
+    let exp = snd . head $ filter (\ (x, _) -> x == c) choices
     in  do
             val <- runReaderT (eval exp) rho
             app val v
 app (VCaseFun ccls) (VNeutral n)            = return . VNeutral $ NeuFun ccls n
 app (VNeutral n) v                          = return . VNeutral $ NeuApp n v
-app (VRecUnit v) VUnit                      = return v  -- defining equation for rec₁
+app (VRecUnit v) VZero                      = return v  -- defining equation for rec₁
+app (VPi _ fcls) v                          = inst fcls v
+app v u                                     = throwError $ DebugApp v u
 
 -- instantiates a function closure to a value
 inst :: MonadError Errors m => FunCls -> Value -> m Value
@@ -235,6 +248,37 @@ instance Eval Expr where
     eval (ExprRecUnit m)            = VRecUnit
         <$> eval m
 
+    eval ExprRefl                   = return VRefl
+
+    eval (ExprI ty a b)             = VI
+        <$> eval ty
+        <*> eval a
+        <*> eval b
+
+    eval (ExprJ ty c base x y p) = do
+        pV <- eval p
+        case pV of
+            VRefl -> do
+                baseV <- eval base
+                baseV `app` VRefl -- definitional equality
+            VNeutral neu -> VNeutral <$> (NeuJ
+                <$> eval ty
+                <*> eval c
+                <*> eval base
+                <*> eval x
+                <*> eval y
+                <*> pure neu)
+
+{-
+    eval (ExprJ ty c base x y p)    = VJ
+        <$> eval ty
+        <*> eval c
+        <*> eval base
+        <*> eval x
+        <*> eval y
+        <*> eval p
+-}
+
 instance Eval Name where
     eval x = do
         rho <- ask
@@ -258,7 +302,7 @@ instance Eval Name where
                     \case
                         VarNotInPattern -> local (const rho') (eval x)
             RNil                                  -> 
-                throwError UndefinedVariable
+                throwError $ UndefinedVariable x
 
 -- normal expressions
 data NExpr where
@@ -274,6 +318,10 @@ data NExpr where
     NCaseFun :: CCls NExpr            -> NExpr
     NSum     :: CCls NExpr            -> NExpr
     NRecUnit :: NExpr                 -> NExpr
+    -- identity
+    NRefl    ::                          NExpr
+    NI       :: NExpr -> NExpr -> NExpr -> NExpr
+    NJ       :: NExpr -> NExpr -> NExpr -> NExpr -> NExpr -> NExpr -> NExpr
     deriving ( Show
              , Eq )
 
@@ -330,6 +378,22 @@ readBack (VNeutral ne) = NNeutral
 
 readBack (VRecUnit v) = NRecUnit
     <$> readBack v
+
+readBack VRefl = return NRefl
+
+readBack (VI ty x y) = NI
+    <$> readBack ty
+    <*> readBack x
+    <*> readBack y
+{-
+readBack (VJ ty c base x y p) = NJ
+    <$> readBack ty
+    <*> readBack c
+    <*> readBack base
+    <*> readBack x
+    <*> readBack y
+    <*> readBack p
+    -}
 
 -- typing environment Γ
 type Gamma = [ ( Name, Value ) ]
@@ -412,6 +476,22 @@ checkConstrMatch ((c, _) : choices) ((c', _) : choices')
 checkConstrMatch []                 [] = return ()
 checkConstrMatch _                  _  = throwError WrongConstructor
 
+pi :: Name -> Expr -> Expr -> Expr
+pi x = ExprPi (PatName x)
+
+eqV :: MonadTC m => Value -> Value -> m Bool
+eqV v u = do
+    nv <- readBack' v
+    nu <- readBack' u
+    if nv == nu 
+        then return True
+        else return False
+
+app3 :: MonadTC m => Value -> Value -> Value -> Value -> m Value
+app3 f x y z = do
+    fx <- f `app` x
+    fxy <- fx `app` y
+    fxy `app` z
 
 -- 4 forms of judgement
 
@@ -551,7 +631,27 @@ check (ExprSum choices) VU =
 -- ρ, Γ ⊢ rec₁ M ⟸ 1 → A
 check (ExprRecUnit m) (VPi VUnit f) = do
     a <- inst f VZero -- TODO : inst 0 ???
+    na <- readBack' a
     check m a -- ρ, Γ ⊢ M ⟸ A
+
+-- identity types
+
+-- formation
+-- ρ, Γ ⊢ I A x y ⟸ U
+check (ExprI ty x y) VU = do
+    check ty VU
+    tyV <- eval' ty
+    check x tyV
+    check y tyV
+
+-- construction
+-- ρ, Γ ⊢ refl ⟸ I A a b
+check ExprRefl (VI ty a b) = do
+    na <- readBack' a
+    nb <- readBack' b
+    if na == nb
+        then return ()
+        else throwError $ ReflNeq na nb
 
 -- otherwise we must infer its type
 check m t = do
@@ -591,6 +691,65 @@ infer (ExprPrj2 m) = do
             v' <- vfst v
             inst g v'
         _          -> throwError TypeMismatch
+
+
+-- ty, x, y is not necessary, since it can be inferred from p
+infer (ExprJ ty c base x y p) = do
+    -- missing, check that p is really I (ty x y)
+    iTy <- infer p
+    checkT c -- check that our predicate is a type
+    case iTy of
+        VI tyV xV yV -> do
+            cV <- eval' c
+            -- then we check that base hase type ∀ x : A . c x x refl
+            xl <- newGenericVal
+            local (over freeCnt (+1)) $ do
+                cX <- app3 cV xl xl VRefl -- if this fail, then we have a type mismatch in c
+                case base of
+                    ExprLam pat expr -> do -- we mimic the process of checking a lambda term, pretending c to have a Pi type
+                        gamma1 <- insertG pat tyV xl
+                        local (over venv (\rho -> RVar rho pat xl) . 
+                               over tenv (const gamma1)) $ check expr cX
+
+                    _                -> throwError Unimplemented
+                pV <- eval' p
+                app3 cV xV yV pV
+{-
+infer (ExprJ _ c base _ _ p) = do
+    iTy <- infer p
+    checkT c -- check that our predicate is a type
+    case iTy of 
+        VI tyV xV yV -> do
+            cV <- eval' c
+            -- then we check that base hase type ∀ x : A . c x x refl
+            rhp <- view venv
+            xl <- newGenericVal
+            cX <- app3 cV xl xl VRefl
+            -- we need generic pattern!!!
+            -- it's easy if we use high order value !
+            case base of
+                ExprLam pat expr -> do
+                    gamma1 <- insertG pat tyV xl
+                    local (over venv (\rho -> RVar rho pat xl) .
+                           over tenv (const gamma1) .
+                           over freeCnt (+1)) $ check expr cX
+
+                ExprName _ -> do
+                    t <- infer base
+                    cX' <- xl `app` t
+                    ncX' <- readBack' cX'
+                    ncX  <- readBack' cX
+                    if ncX == ncX'
+                        then return ()
+                        else throwError TypeMismatch
+                
+                ExprCaseFun _ -> throwError Unimplemented
+                _             -> throwError TypeMismatch
+
+            pV <- eval' p
+            app3 cV xV yV pV
+        _            -> throwError NotIdInJ
+-}
 
 infer expr = throwError $ NonInferable expr
 

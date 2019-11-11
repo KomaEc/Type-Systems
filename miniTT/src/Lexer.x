@@ -25,6 +25,10 @@ tokens :-
     "--".*                              ;
     "rec₁"                              { lex' TokenRecUnit }
     "rec1"                              { lex' TokenRecUnit }
+    "refl"                              { lex' TokenRefl }
+    "I"                                 { lex' TokenI }
+    "J"                                 { lex' TokenJ }
+    "&"                                 { lex' TokenMetaAnd }
     "lambda"                            { lex' TokenLam }
     "rec"                               { lex' TokenRec }
     "λ"                                 { lex' TokenLam }
@@ -102,6 +106,10 @@ data Token = Token AlexPosn TokenClass
 
 data TokenClass 
     = TokenLam
+    | TokenI                    -- "I"
+    | TokenJ                    -- "J"
+    | TokenRefl                 -- "refl"
+    | TokenMetaAnd              -- "&"
     | TokenRecUnit              -- "rec₁"
     | TokenRec
     | TokenArrow                -- "→"

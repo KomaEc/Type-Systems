@@ -19,8 +19,12 @@ decl3 = "elimBool : Π c : bool → U . c (False 0) → c (True 0) → Π b : bo
 decl4 :: String
 decl4 = "rec natrec : ∀ c : nat → U . c Zero → (∀ n : nat . c n → c (Succ n)) → ∀ n : nat . c n = λ c . λ a . λ g . fun (Zero → a | Succ n → g n (natrec c a g n));"
 
+decl5 :: String
+decl5 = "rec zeroAdd : ∀ n : nat . I (nat & add zero n & n)\n= fun (Zero → refl\n| Succ n → refl);"
+
+
 decls :: [String]
-decls = [decl1, decl2, decl3, decl4]
+decls = [decl1, decl2, decl3, decl4, decl5]
 
 testParser :: IO ()
 testParser = 

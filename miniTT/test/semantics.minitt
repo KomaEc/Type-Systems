@@ -22,6 +22,14 @@ rec nat : U
         = Sum (Zero | Succ nat)
 ;
 
+zero : nat
+     = Zero
+;
+
+succ : nat → nat
+     = λ n . Succ n
+;
+
 rec natrec : ∀ c : nat → U . c Zero → (∀ n : nat . c n → c (Succ n)) 
            → ∀ n : nat . c n
            = λ c . λ a . λ g . fun (Zero → a | Succ n → g n (natrec c a g n))
@@ -35,3 +43,41 @@ rec eqNat : nat → nat → bool
           = fun (Zero → fun (Zero → True | Succ _ → False)
                | Succ n → fun (Zero → False | Succ m → eqNat n m))
 ;
+
+-- induction principle for unit type
+indUnit : ∀ c : 1 → U . c 0 → ∀ x : 1 . c x
+        = λ c . λ c0 . rec₁ c0
+;
+
+-- recusor for unit type
+recUnit : ∀ c : U . c → 1 → c
+        = λ c . indUnit (λ _ . c) 
+;
+
+eqNat : ∀ n : nat . I (nat & n & n)
+      = λ n . refl
+;
+
+eqSucc : ∀ n : nat . ∀ m : nat .
+         I(nat & n & m) → I(nat & Succ n & Succ m)
+       = λ n . λ m . λ p . J (nat 
+                           & (∀ x : nat . ∀ y : nat . ∀ q : I(nat & x & y) . I (nat & Succ x & Succ y))
+                           & (λ x . refl)
+                           & n
+                           & m 
+                           & p)
+;
+
+one : nat
+    = succ zero
+;
+
+-- emmmm.. we must use "zero" instead of Zero
+ rec zeroAdd : ∀ n : nat . I (nat & add zero n & n)
+            = fun (Zero → refl
+                 | Succ n → eqSucc (add zero n) n (zeroAdd n))
+;
+
+-- rec addCommute : ∀ n : nat . ∀ m : nat .
+--                  I (nat & add n m & add m n)
+--                = fun (Zero → fun (Zero → refl | Succ m → ))

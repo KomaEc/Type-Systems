@@ -1,0 +1,26 @@
+rec nat : U
+        = Sum (Zero | Succ nat)
+;
+
+eqSucc : ∀ n : nat . ∀ m : nat .
+         I(nat & n & m) → I(nat & Succ n & Succ m)
+       = λ n . λ m . λ p . J (nat 
+                           & (∀ x : nat . ∀ y : nat . ∀ q : I(nat & x & y) . I (nat & Succ x & Succ y))
+                           & (λ x . refl)
+                           & n
+                           & m 
+                           & p)
+;
+
+rec add : nat -> nat -> nat
+        = λ n . fun (Zero → n | Succ m → Succ (add n m))
+;
+
+zero : nat
+     = Zero
+;
+
+rec zeroAdd : ∀ n : nat . I (nat & add zero n & n)
+             = fun (Zero → refl
+                  | Succ m → eqSucc (add zero m) m (zeroAdd m))
+;
